@@ -7,7 +7,7 @@
 		input logic  [10:0]						fin_counter_in,
 		
 		output logic [15:0][7:0] 			round_out,
-		output logic [10:0] 						fin_counter_out
+		output logic [10:0] 					fin_counter_out
 
 };
 
@@ -155,10 +155,8 @@ endfunction;
 		assign mixcol_out[14] =    mixcol_in[12]  ^    mixcol_in[13]  ^ x2(mixcol_in[14]) ^ x3(mixcol_in[15]); 
 		assign mixcol_out[15] = x3(mixcol_in[12]) ^    mixcol_in[13]  ^    mixcol_in[14]  ^ x2(mixcol_in[15]); 
 
-
 		//the fin counter counts the amount of times we have gone through the AES module.  
 		assign fin_counter_out = {fin_counter_in<<1};
-
 
 		//bitwise XORs the key with the column output, completing the AddRoundKey step.
 		//direct vector XOR is feasible because both the MixColumns output and roundkey input are orientated in the same way.
