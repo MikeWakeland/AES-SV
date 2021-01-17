@@ -1,9 +1,0 @@
-`include "proc_hdr.sv"
-`include "rtllib.sv"
-`define SIM  //tick commands are commands to the tools.  Tells the tools that it should go to these files and grab whats in there.  
-
-//----------------------------------------------
-`timescale 1ns/1ps
-
-module tb_top ();
-
