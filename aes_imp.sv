@@ -1,20 +1,3 @@
-	//This module defines every AES round, from beginning to end.  
-	//the initial counter of fin_counter_in should be 9'b000000001.  
-	module aesround {
-
-		input logic  [127:0] 					round_in,
-		input logic  [127:0] 					round_key,
-		input logic  [10:0]						fin_counter_in,
-		
-		output logic [15:0][7:0] 			round_out,
-		output logic [10:0] 					fin_counter_out
-
-};
-
-
-//box
-	 logic [15:0][7:0] 	 sbox_out;
-
 const logic [255:0][7:0] SBOX = {
 // 255		254		 253		252		 251		250		 249		248 	 247		246		 245		244		 243		242		 241		240		 
    8'h63, 8'h7c, 8'h77, 8'h7b, 8'hf2, 8'h6b, 8'h6f, 8'hc5, 8'h30, 8'h01, 8'h67, 8'h2b, 8'hfe, 8'hd7, 8'hab, 8'h76,  //
@@ -35,80 +18,158 @@ const logic [255:0][7:0] SBOX = {
    8'h8c, 8'ha1, 8'h89, 8'h0d, 8'hbf, 8'he6, 8'h42, 8'h68, 8'h41, 8'h99, 8'h2d, 8'h0f, 8'hb0, 8'h54, 8'hbb, 8'h16 }; //
 
 
+
+	module keyschedule {
+
+		input		logic 	[3:0][3:0][7:0]		last_rounds_words,
+		input		logic 	[255:0][7:0]			SBOX,	
+		input		logic 	[127:0]						true_key,
+		input		logic 	[7:0]							round_constant, //I still have to define the RC in it's entirety.  		
+		
+		output	logic 	[127:0][7:0]			key_words //Four words per round, Four bytes per word, Eight bits per byte.
+};
+	
+		logic		[15:0][7:0]		key_bytes,
+		logic		[3:0][7:0]		g_out, g_in;
+	
+	
+	assign g_in					= initial_round ? true_key[31:0] : last_rounds_words[0];//whatever the last word is from the last round.
+	
+	gfunc gfunc {
+	
+		.g_out					(g_out),
+		.SBOX						(SBOX),
+		.word						(g_in), //key words go here.  Need to properly index the key_words
+		.round_constant (round_constant)  
+		
+};
+ 
+	assign key_words[3] = initial_round ? true_key[127:96]: g_out 			 ^ last_rounds_words[3];
+	assign key_words[2] = initial_round ? true_key[95:64]	: key_words[3] ^ last_rounds_words[2];
+	assign key_words[1] = initial_round ? true_key[63:32]	: key_words[2] ^ last_rounds_words[1];
+	assign key_words[0] = initial_round ? true_key[31:0]	: key_words[1] ^ last_rounds_words[0]; 
+	
+	endmodule: keyschedule
+	
+	
+	module gfunc{
+	
+		input		logic		[255:0][7:0]		SBOX,	
+		input		logic 	[7:0]  					word,
+		input		logic 	[7:0]						round_constant,
+		
+		output	logic		[3:0][7:0]			g_out
+};
+	
+	logic [3:0][7:0]	word_sbox, word_shift;
+
+	
+	assign word_shift = {word[2:0] , word[3]};
+	
+	word_sbox[3] = SBOX[word_shift[3]];
+	word_sbox[2] = SBOX[word_shift[2]];
+	word_sbox[1] = SBOX[word_shift[1]];
+	word_sbox[0] = SBOX[word_shift[0]];
+	
+	assign g_out = word_sbox ^ {round_constant, 24'b0};
+	
+endmodule gfunc;	
+
+	
+	//This module defines every AES round, from beginning to end.  
+	//the initial counter of fin_counter_in should be 9'b000000001.  
+	module aesround {
+
+		input logic  [127:0] 					round_in,
+		input logic  [3:0][3:0][7:0]	key_words,
+		input logic  [10:0]						fin_counter_in,
+		input logic	 [255:0][7:0]			SBOX,
+		
+		output logic [15:0][7:0] 			round_out,
+		output logic [10:0] 					fin_counter_out
+
+};
+
+//box
+	 logic [15:0][7:0] 	 sbox_out;
+
 //ShiftRows
-		logic [15:0][7:0]    shiftrows_out, 		
+	logic [15:0][7:0]    shiftrows_out, 		
 
 //MixColumns
-	  logic [15:0][7:0] 	 mixcol_in, //may need to be registered etc.
-		logic [15:0][7:0]    mixcol_out, 
-		logic [15:0][7:0] 	 round_keyop,
-		logic [15:0][7:0]		 round_key_in;
+  logic [15:0][7:0] 	 mixcol_in, //may need to be registered etc.
+	logic [15:0][7:0]    mixcol_out, 
+	logic [15:0][7:0] 	 round_keyop,
+	logic [15:0][7:0]		 round_key_in;
 
 
 ///SBOX
 // The SBOX is a direct reference to the given SBOX table, using the plaintext input 
 // as a way to index the lookup table.
 
-		assign sbox_out[0]  = SBOX[round_in[0]] ;
-		assign sbox_out[1]  = SBOX[round_in[1]] ;
-		assign sbox_out[2]  = SBOX[round_in[2]] ;
-		assign sbox_out[3]  = SBOX[round_in[3]] ;
-		assign sbox_out[4]  = SBOX[round_in[4]] ;
-		assign sbox_out[5]  = SBOX[round_in[5]] ;
-		assign sbox_out[6]  = SBOX[round_in[6]] ;
-		assign sbox_out[7]  = SBOX[round_in[7]] ;
-		assign sbox_out[8]  = SBOX[round_in[8]] ;
-		assign sbox_out[9]  = SBOX[round_in[9]] ;
-		assign sbox_out[10] = SBOX[round_in[10]];
-		assign sbox_out[11] = SBOX[round_in[11]]; 
-		assign sbox_out[12] = SBOX[round_in[12]];
-		assign sbox_out[13] = SBOX[round_in[13]];
-		assign sbox_out[14] = SBOX[round_in[14]]; 
-		assign sbox_out[15] = SBOX[round_in[15]];
+	assign sbox_out[0]  = SBOX[round_in[0]] ;
+	assign sbox_out[1]  = SBOX[round_in[1]] ;
+	assign sbox_out[2]  = SBOX[round_in[2]] ;
+	assign sbox_out[3]  = SBOX[round_in[3]] ;
+	assign sbox_out[4]  = SBOX[round_in[4]] ;
+	assign sbox_out[5]  = SBOX[round_in[5]] ;
+	assign sbox_out[6]  = SBOX[round_in[6]] ;
+	assign sbox_out[7]  = SBOX[round_in[7]] ;
+	assign sbox_out[8]  = SBOX[round_in[8]] ;
+	assign sbox_out[9]  = SBOX[round_in[9]] ;
+	assign sbox_out[10] = SBOX[round_in[10]];
+	assign sbox_out[11] = SBOX[round_in[11]]; 
+	assign sbox_out[12] = SBOX[round_in[12]];
+	assign sbox_out[13] = SBOX[round_in[13]];
+	assign sbox_out[14] = SBOX[round_in[14]]; 
+	assign sbox_out[15] = SBOX[round_in[15]];
 
 
 ///ShiftRows
 //As a matter of convention, I am going with the standard as described in the wikipedia article, 
-//which is to say that b0 is the top left most bit, and b0 will be made up of the least significant
-//8 bits in the 128 bit round_in.  Indicies are in column-major format.  
+//which is to say that b0 is the top left most bit, and b0 will be made up of the most significant
+//8 bits in the 128 bit round_in.  Indicies are in column-major format.
+// example, key = {b0, b1, b2,..., b13, b14, b15}.  b0 = key[127:120] = key[15][7:0]
+// Since SV indicies are large at the MSB they must be reversed to be algoritmically correct.  
+
 /*
 input matrix (sbox_out):		  output matrix, using input indicies:
 col		i   ii	ii  iv 						i 	ii	iii	iv
-		| 0   4   8   12   |  		| 0   4   8   12  |  
-		| 1   5   9   13   |			| 5   9   13  1   |
-		| 2   6   10  14   |	=>	| 10  14  2   6   |
-		| 3   7   11  15   |			| 15  3   7   11  |
+		| b0  b4  b8  b12   |  		| b0   b4   b8   b12  |  
+		| b1  b5  b9  b13   |			| b5   b9   b13  b1   |
+		| b2  b6  b10 b14   |	=>	| b10  b14  b2   b6   |
+		| b3  b7  b11 b15   |			| b15  b3   b7   b11  |
 */		
 
 		//i
-		assign shiftrows_out[0]  = sbox_out[0] ;
-		assign shiftrows_out[1]  = sbox_out[5] ;
-		assign shiftrows_out[2]  = sbox_out[10];
-		assign shiftrows_out[3]  = sbox_out[15];
+	assign shiftrows_out[15]  = sbox_out[0] ;
+	assign shiftrows_out[14]  = sbox_out[5] ;
+	assign shiftrows_out[13]  = sbox_out[10];
+	assign shiftrows_out[12]  = sbox_out[15];
 		
 		//ii
-		assign shiftrows_out[4]  = sbox_out[4] ;
-		assign shiftrows_out[5]  = sbox_out[9] ;
-		assign shiftrows_out[6]  = sbox_out[14];
-		assign shiftrows_out[7]  = sbox_out[3] ;
+	assign shiftrows_out[11]  = sbox_out[4] ;
+	assign shiftrows_out[10]  = sbox_out[9] ;
+	assign shiftrows_out[9]   = sbox_out[14];
+	assign shiftrows_out[8]   = sbox_out[3] ;
 
 		//iii
-		assign shiftrows_out[8]  = sbox_out[8] ;
-		assign shiftrows_out[9]  = sbox_out[13];
-		assign shiftrows_out[10] = sbox_out[2] ;
-		assign shiftrows_out[11] = sbox_out[7] ;
+	assign shiftrows_out[7]   = sbox_out[8] ;
+	assign shiftrows_out[6]   = sbox_out[13];
+	assign shiftrows_out[5]   = sbox_out[2] ;
+	assign shiftrows_out[4]   = sbox_out[7] ;
 
 		//iv
-		assign shiftrows_out[12] = sbox_out[12];
-		assign shiftrows_out[13] = sbox_out[1] ;
-		assign shiftrows_out[14] = sbox_out[6] ;
-		assign shiftrows_out[15] = sbox_out[11];
+	assign shiftrows_out[3] 	= sbox_out[12];
+	assign shiftrows_out[2] 	= sbox_out[1] ;
+	assign shiftrows_out[1] 	= sbox_out[6] ;
+	assign shiftrows_out[0] 	= sbox_out[11];
 
 //  MixColumns
 //	Performs matrix multiplication of the left arithmetic matrix with the right ShiftRows output
 //	The multiplication function is done by a left shift and additions performed by bitwise XOR.  
 	
-		assign mixcol_in = shiftrows_out;
+	assign mixcol_in = shiftrows_out;
 
 /* 
 | 2 3 1 1 |       |b0	b4 	b8	b12|			|c0	c4 	c8	c12|
@@ -135,32 +196,32 @@ endfunction;
 	};
 endfunction;
  
-		assign mixcol_out[0]  = x2(mixcol_in[0])  ^ x3(mixcol_in[1])  ^    mixcol_in[2]   ^ 	 mixcol_in[3];
-		assign mixcol_out[1]  =    mixcol_in[0]   ^ x2(mixcol_in[1])  ^ x3(mixcol_in[2])  ^    mixcol_in[3];
-		assign mixcol_out[2]  =    mixcol_in[0]   ^    mixcol_in[1]   ^ x2(mixcol_in[2])  ^ x3(mixcol_in[3]);
-		assign mixcol_out[3]  = x3(mixcol_in[0])  ^    mixcol_in[1]   ^    mixcol_in[2]   ^ x2(mixcol_in[3]);
+	assign mixcol_out[0]  = x2(mixcol_in[0])  ^ x3(mixcol_in[1])  ^    mixcol_in[2]   ^ 	 mixcol_in[3];
+	assign mixcol_out[1]  =    mixcol_in[0]   ^ x2(mixcol_in[1])  ^ x3(mixcol_in[2])  ^    mixcol_in[3];
+	assign mixcol_out[2]  =    mixcol_in[0]   ^    mixcol_in[1]   ^ x2(mixcol_in[2])  ^ x3(mixcol_in[3]);
+	assign mixcol_out[3]  = x3(mixcol_in[0])  ^    mixcol_in[1]   ^    mixcol_in[2]   ^ x2(mixcol_in[3]);
 
-		assign mixcol_out[4]  = x2(mixcol_in[4])  ^ x3(mixcol_in[5])  ^    mixcol_in[6]	  ^    mixcol_in[7];
-		assign mixcol_out[5]  =    mixcol_in[4]   ^ x2(mixcol_in[5])  ^ x3(mixcol_in[6])  ^    mixcol_in[7]; 
-		assign mixcol_out[6]  =    mixcol_in[4]   ^    mixcol_in[5]   ^ x2(mixcol_in[6])  ^ x3(mixcol_in[7]); 
-		assign mixcol_out[7]  = x3(mixcol_in[4])  ^    mixcol_in[5]   ^    mixcol_in[6]   ^ x2(mixcol_in[7]); 
+	assign mixcol_out[4]  = x2(mixcol_in[4])  ^ x3(mixcol_in[5])  ^    mixcol_in[6]	  ^    mixcol_in[7];
+	assign mixcol_out[5]  =    mixcol_in[4]   ^ x2(mixcol_in[5])  ^ x3(mixcol_in[6])  ^    mixcol_in[7]; 
+	assign mixcol_out[6]  =    mixcol_in[4]   ^    mixcol_in[5]   ^ x2(mixcol_in[6])  ^ x3(mixcol_in[7]); 
+	assign mixcol_out[7]  = x3(mixcol_in[4])  ^    mixcol_in[5]   ^    mixcol_in[6]   ^ x2(mixcol_in[7]); 
 
-		assign mixcol_out[8]  = x2(mixcol_in[8])  ^ x3(mixcol_in[9])  ^    mixcol_in[10]  ^    mixcol_in[11];
-		assign mixcol_out[9]  =    mixcol_in[8]   ^ x2(mixcol_in[9])  ^ x3(mixcol_in[10]) ^   mixcol_in[11]; 
-		assign mixcol_out[10] =    mixcol_in[8]   ^    mixcol_in[9]   ^ x2(mixcol_in[10]) ^ x3(mixcol_in[11]); 
-		assign mixcol_out[11] = x3(mixcol_in[8])  ^    mixcol_in[9]   ^    mixcol_in[10]  ^ x2(mixcol_in[11]); 
+	assign mixcol_out[8]  = x2(mixcol_in[8])  ^ x3(mixcol_in[9])  ^    mixcol_in[10]  ^    mixcol_in[11];
+	assign mixcol_out[9]  =    mixcol_in[8]   ^ x2(mixcol_in[9])  ^ x3(mixcol_in[10]) ^   mixcol_in[11]; 
+	assign mixcol_out[10] =    mixcol_in[8]   ^    mixcol_in[9]   ^ x2(mixcol_in[10]) ^ x3(mixcol_in[11]); 
+	assign mixcol_out[11] = x3(mixcol_in[8])  ^    mixcol_in[9]   ^    mixcol_in[10]  ^ x2(mixcol_in[11]); 
 
-		assign mixcol_out[12] = x2(mixcol_in[12]) ^ x3(mixcol_in[13]) ^     mixcol_in[14] ^		 mixcol_in[15];
-		assign mixcol_out[13] =    mixcol_in[12]  ^ x2(mixcol_in[13]) ^ x3(mixcol_in[14]) ^    mixcol_in[15];
-		assign mixcol_out[14] =    mixcol_in[12]  ^    mixcol_in[13]  ^ x2(mixcol_in[14]) ^ x3(mixcol_in[15]); 
-		assign mixcol_out[15] = x3(mixcol_in[12]) ^    mixcol_in[13]  ^    mixcol_in[14]  ^ x2(mixcol_in[15]); 
+	assign mixcol_out[12] = x2(mixcol_in[12]) ^ x3(mixcol_in[13]) ^     mixcol_in[14] ^		 mixcol_in[15];
+	assign mixcol_out[13] =    mixcol_in[12]  ^ x2(mixcol_in[13]) ^ x3(mixcol_in[14]) ^    mixcol_in[15];
+	assign mixcol_out[14] =    mixcol_in[12]  ^    mixcol_in[13]  ^ x2(mixcol_in[14]) ^ x3(mixcol_in[15]); 
+	assign mixcol_out[15] = x3(mixcol_in[12]) ^    mixcol_in[13]  ^    mixcol_in[14]  ^ x2(mixcol_in[15]); 
 
 		//the fin counter counts the amount of times we have gone through the AES module.  
-		assign fin_counter_out = {fin_counter_in<<1};
+	assign fin_counter_out = {fin_counter_in<<1};
 
 		//bitwise XORs the key with the column output, completing the AddRoundKey step.
 		//direct vector XOR is feasible because both the MixColumns output and roundkey input are orientated in the same way.
 		//The mux selects shiftrows or mixcol as an input.  The impact is to skip MixColumns if this is the last AES round. 
-		assign round_out = ( fin_counter_in[10] ? shiftrows_out : mixcol_out)^round_key;
+	assign round_out = ( fin_counter_in[10] ? shiftrows_out : mixcol_out)^round_key;
 
 endmodule: aesround
