@@ -75,6 +75,27 @@ const logic [255:0][7:0] SBOX = {
 	
 endmodule gfunc;	
 
+
+
+
+
+/* module aes_enc_dec (
+     input  logic                          eph1,
+     input  logic                          reset,
+     input  logic  [$bits(AES_CTRL)-1:0]   control_bits,   // enc/dec, key size, mode
+
+     input  logic  [(KEY_SZ*128)-1:0]      	key_schedule,   // precalculated
+     input  logic                          	start,          // 1 clock pulse while pt_data good
+     input  logic [127:0]           				pt_data,     // start can be used to clk enable pt_data
+
+     output logic                         	done,         // 1 clock pulse asserted early the same clk as enc_data appears
+     output logic  [127:0]									enc_data    // done can be used to clk enable enc_data
+
+); */
+
+
+
+
 	
 	//This module defines every AES round, from beginning to end.  
 	//the initial counter of fin_counter_in should be 9'b000000001.  
