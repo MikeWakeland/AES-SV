@@ -19,7 +19,7 @@ const logic [255:0][7:0] SBOX = {
 
 
 
-	module keyschedule {
+	module keyschedule (
 
 		input		logic 	[3:0][3:0][7:0]		last_rounds_words,
 		input		logic 	[255:0][7:0]			SBOX,	
@@ -27,7 +27,7 @@ const logic [255:0][7:0] SBOX = {
 		input		logic 	[7:0]							round_constant, //I still have to define the RC in it's entirety.  		
 		
 		output	logic 	[127:0][7:0]			key_words //Four words per round, Four bytes per word, Eight bits per byte.
-};
+);
 	
 		logic		[15:0][7:0]		key_bytes,
 		logic		[3:0][7:0]		g_out, g_in;
