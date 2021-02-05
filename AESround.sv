@@ -74,14 +74,18 @@
 	
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////Bit stuffing section - fake inputs///////////////////////////////////////////////////
-////////roundkeys and bitstreams generated from Cipher.m and associated files. Cipher('key','data')/////////////////////////////
-//The real module will take that round's already expanded RoundKey as an input to round_key, and the round in will be either////
-//the output of the plaintext's XOR with the 0th RoundKey or the output from the previous round.////////////////////////////////
-
-
-			logic [14:0][127:0] key_words; 
+///At this point every fake input is comes as an output wire from keyexpansion.sv, so keyexpansion's outputs are therefore/////
+///already defined.////////////////////////////////////////////////////////////////////////////////////////////////////////////
 			
-			//key_words generated from true key 'hD9DA7BEA1A31D8ABE2A27B4E855C5C5C50ED00C48388EA9B KeyExpansion.m
+		logic [127:0] plain_text;
+		assign plain_text = 128'hD005A3321BBF085C2BC611AE8820839D;   //Generated via matlab: binaryVectorToHex(ceil(rand(1,128)-.5))
+
+		logic [255:0] true_key;
+		assign true_key = 256'h27ECB2E3A5EE3894885B5289307400E398546B83039E89EED41DC9E5F9AC1751;  //This is a fake input, which is 256 bits long with 256 bits.  
+
+
+		logic [14:0][127:0] key_words; 
+			//key_words generated from true key KeyExpansion.m
 			/*
 			Software key generation commands:
 			KeyExpansion( 'key' , 4 ); //4 for 128 bits, 6 for 192 bits, 8 for 256 bits
@@ -90,72 +94,32 @@
 			reshape(ans,32,[]);
 			ans'
 			*/
-			
-const logic [127:0] plain_text = '{ 128'hD005A3321BBF085C2BC611AE8820839D};   //Generated via matlab: binaryVectorToHex(ceil(rand(1,128)-.5))
-
-logic [255:0] true_key;
-	assign true_key = 256'h27ECB2E3A5EE3894885B5289307400E398546B83039E89EED41DC9E5F9AC1751;  //This is a fake input, which is 256 bits long with 256 bits.  
-
-assign key_words = '{128'h27ECB2E3A5EE3894885B5289307400E3,
-    128'h98546B83039E89EED41DC9E5F9AC1751,
-    128'hB71C637A12F25BEE9AA90967AADD0984,
-    128'h34956ADC370BE332E3162AD71ABA3D86,
-    128'h413B27D853C97C36C960755163BD7CD5,
-    128'hCFEF7ADFF8E499ED1BF2B33A01488EBC,
-    128'h172242A444EB3E928D8B4BC3EE363716,
-    128'hE7EAE0981F0E797504FCCA4F05B444F3,
-    128'h92394FCFD6D2715D5B593A9EB56F0D88,
-    128'h3242375C2D4C4E2929B084662C04C095,
-    128'h708365BEA65114E3FD082E7D486723F5,
-    128'h60C711BA4D8B5F93643BDBF5483F1B60,
-    128'h252CB5EC837DA10F7E758F723612AC87,
-    128'h650E80AD2885DF3E4CBE04CB04811FAB,
-    128'h69ECD71EEA91761194E4F963A2F655E4};
-
-///////////////192 bit verification/////////////////////////////////////////
-/* 
-			const logic [127:0] plain_text = '{ 128'hD005A3321BBF085C2BC611AE8820839D};
-			
-	logic [255:0] true_key;
-	assign true_key = 256'hD9DA7BEA1A31D8ABE2A27B4E855C5C5C50ED00C48388EA9B;  //This is a fake input, which is 256 bits long but only has 192 nonzero bits.  
-
- // The true key is 192'hD9DA7BEA1A31D8ABE2A27B4E855C5C5C50ED00C48388EA9B'
-    assign key_words = '{192'hD9DA7BEA1A31D8ABE2A27B4E855C5C5C,
-    192'h50ED00C48388EA9B1C5D6F06066CB7AD,
-    192'hE4CECCE3619290BF317F907BB2F77AE0,
-    192'h76878E3170EB399C9425F57FF5B765C0,
-    192'hC4C8F5BB763F8F5B07F4B709771F8E95,
-    192'hE33A7BEA168D1E2AD245EB91A47A64CA,
-    192'hD5B7C340A2A84DD54192363F571F2815,
-    192'h855AC3842120A74E72EBECBDD043A168,
-    192'h91D19757C6CEBF4243947CC662B4DB88,
-    192'hDF5228170F11897F9EC01E28580EA16A,
-    192'h1B9ADDAC792E0624AE3D1EA1A12C97DE,
-    192'h3FEC89F667E2289C7C78F5300556F314,
-    192'h9F30E4CA3E1C731401F0FAE26612D27E}; // fake, for use in bit stuffing.   */
-////end 192 bit verification///////////////////////////////////////////////////////		
-	
-////////128 bit verification///////////////////////////////////////////////////////
-/* logic [255:0] true_key;
-	assign true_key = 256'hAB7F34AFDD7382220E089AFB3D909866;  //This is a fake input, which is 256 bits long but only has 128 nonzero bits.  
-
-			const logic [127:0] plain_text = '{ 128'h50ED00C48388EA9B0FB7C204C2C12D39};   //Generated via matlab: binaryVectorToHex(ceil(rand(1,128)-.5))
-
-			assign key_words = '{128'hAB7F34AFDD7382220E089AFB3D909866, 128'hCA390788174A85AA19421F5124D28737,
-													 128'h7D2E9DBE6A6418147326074557F48072, 128'hC6E3DDE5AC87C5F1DFA1C2B4885542C6,
-													 128'h32CF69219E48ACD041E96E64C9BC2CA2, 128'h47BE53FCD9F6FF2C981F914851A3BDEA,
-													 128'h6DC4D42DB4322B012C2DBA497D8E07A3, 128'h3401DED28033F5D3AC1E4F9AD1904839,
-													 128'hD453CCEC5460393FF87E76A529EE3E9C, 128'hE7E11249B3812B764BFF5DD36211634F,
-													 128'h531A96E3E09BBD95AB64E046C9758309}; //FAKE for use in spoon feeding. 											 
- */
-////end 128 bit verification///////////////////////////////////////////////////////
-
+			//The key words are arrainged such the first key_word (128'h27e...) is index [14], but in the real input the opposite will be true.  This drives some odd choices 
+			//for arguments later. 
+		assign key_words = '{128'h27ECB2E3A5EE3894885B5289307400E3,
+				128'h98546B83039E89EED41DC9E5F9AC1751,
+				128'hB71C637A12F25BEE9AA90967AADD0984,
+				128'h34956ADC370BE332E3162AD71ABA3D86,
+				128'h413B27D853C97C36C960755163BD7CD5,
+				128'hCFEF7ADFF8E499ED1BF2B33A01488EBC,
+				128'h172242A444EB3E928D8B4BC3EE363716,
+				128'hE7EAE0981F0E797504FCCA4F05B444F3,
+				128'h92394FCFD6D2715D5B593A9EB56F0D88,
+				128'h3242375C2D4C4E2929B084662C04C095,
+				128'h708365BEA65114E3FD082E7D486723F5,
+				128'h60C711BA4D8B5F93643BDBF5483F1B60,
+				128'h252CB5EC837DA10F7E758F723612AC87,
+				128'h650E80AD2885DF3E4CBE04CB04811FAB,
+				128'h69ECD71EEA91761194E4F963A2F655E4};
 
 			logic ready;
-			assign ready = 1'b1;
+			assign ready = 1'b1;  //the ready flag will come from keyexpansion.sv when the last round_key has generated, telling AESround that it can begin.
+			
 /////////////////////////////////////////////////////End fake input section///////////////////////////////////////////////////////		
-		
-		
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 		logic keyflag_128, keyflag_192, keyflag_256, start_flag, fin_flag;
 	//	logic [255:0] true_key;  //True key is presently inactive because I'm feeding the keys directly as fake inputs.  
 		logic [127:0] round_recycle, round_in;
@@ -172,13 +136,14 @@ assign key_words = '{128'h27ECB2E3A5EE3894885B5289307400E3,
 		rregs #(128)  finfl ( round_recycle , round_out , eph1);
 		rregs #(128) cyc    ( aes_out , round_out , fin_flag& ~eph1); //spits out the actual AES cyphertext.  Cheapest copout ever with timing on the ~eph1 here.  TIMING issue, discuss!
 		assign round_in = start_flag ? plain_text^key_words[14] : round_recycle ; //bugs here, wrong number of bits + unsure of what true_key is supposed to do.  Shouldn't this be the plain text?
-																																							//key_words[14] is used for fake inputs, to be replaced with [0] with keyexpansion.sv.
+																																							//key_words[14] is used for fake inputs, to be replaced with [0] with keyexpansion.sv.																																																																											
+																																																																														
 		//////////////////////////////////////////////////////////////////////////////////////	///////////////////////////////////////////////////////////////////////////
 		//This section times the fin_flag, the purpose of which is to tell the machine that it has reached the final round of AES.  The fin flag should rise
 		//after either 10, 12, or 14 rounds depending on the key length.  
 		//Decides what size the key is based on the inputs to the full sized (256 bit) input.  
 		//The key is assumed to be of lower length if the Most of next Most significant 64 bits are all zeroes.
-		assign keyflag_256 = |true_key[255:192];  //might have indicies backwards again but I don't think so.
+		assign keyflag_256 = |true_key[255:192];  
 		assign keyflag_192 = ~|true_key[255:192] & (|true_key[191:128]);
 		assign keyflag_128 =  ~(keyflag_256 | keyflag_192);
 		
@@ -204,8 +169,7 @@ assign key_words = '{128'h27ECB2E3A5EE3894885B5289307400E3,
 		initial round_index = 4'b0;
 		initial round_index_next = 4'b0;
 		assign round_index_next = round_index + 1; 
-		//counter rnd (round_index_next , round_index ,ready&eph1); //the counter only begins to increment when the ready flag comes from keyexpansion. ready is not yet declared
-																															//in the aes module.  
+
 		rregs #(4) ksdk (round_index, round_index_next, ready&eph1);
 		
 		assign round_key = key_words[14-round_index];								//key_words is the entire register vector in keyexpansion.sv.  For fake inputs I'm using [round size]-round_index,
@@ -287,33 +251,13 @@ endmodule: tb_top
 				| b13  b9   b5   b1   |	=>	| b5    b1   b13  b9  |
 				| b12  b8   b4   b0   |			| b0    b12  b8   b4  |
 		*/		
-		 
-	 //ShiftRows
-		logic [15:0][7:0]    shiftrows_out; 
-	 
-			//i
-		assign shiftrows_out[15]  = sbox_out[15] ;
-		assign shiftrows_out[14]  = sbox_out[10] ;
-		assign shiftrows_out[13]  = sbox_out[5];
-		assign shiftrows_out[12]  = sbox_out[0];
-			
-			//ii
-		assign shiftrows_out[11]  = sbox_out[11] ;
-		assign shiftrows_out[10]  = sbox_out[6] ;
-		assign shiftrows_out[9]   = sbox_out[1];
-		assign shiftrows_out[8]   = sbox_out[12] ;
-
-			//iii
-		assign shiftrows_out[7]   = sbox_out[7] ;
-		assign shiftrows_out[6]   = sbox_out[2];
-		assign shiftrows_out[5]   = sbox_out[13] ;
-		assign shiftrows_out[4]   = sbox_out[8] ;
-
-			//iv
-		assign shiftrows_out[3] 	= sbox_out[3];
-		assign shiftrows_out[2] 	= sbox_out[14] ;
-		assign shiftrows_out[1] 	= sbox_out[9] ;
-		assign shiftrows_out[0] 	= sbox_out[4];
+	
+		logic [15:0][7:0]    shiftrows_out; 	 
+			//i																					//ii																				//iii																				//iv
+		assign shiftrows_out[15]  = sbox_out[15];			assign shiftrows_out[11]  = sbox_out[11];		assign shiftrows_out[7]   = sbox_out[7] ; 	assign shiftrows_out[3] 	= sbox_out[3] ;
+		assign shiftrows_out[14]  = sbox_out[10];			assign shiftrows_out[10]  = sbox_out[6] ;		assign shiftrows_out[6]   = sbox_out[2] ;		assign shiftrows_out[2] 	= sbox_out[14];
+		assign shiftrows_out[13]  = sbox_out[5]	;			assign shiftrows_out[9]   = sbox_out[1] ;		assign shiftrows_out[5]   = sbox_out[13];		assign shiftrows_out[1] 	= sbox_out[9] ;
+		assign shiftrows_out[12]  = sbox_out[0] ;			assign shiftrows_out[8]   = sbox_out[12];		assign shiftrows_out[4]   = sbox_out[8] ;		assign shiftrows_out[0] 	= sbox_out[4] ;
 
 		//  MixColumns
 		//	Performs matrix multiplication of the left arithmetic matrix with the right ShiftRows output
@@ -323,13 +267,6 @@ endmodule: tb_top
 		
 		assign mixcol_in = shiftrows_out;
 
-		/* 
-		| 2 3 1 1 |       | b15 b11 b7 b3 |				| c15 c11 c7 c3 |
-		| 1 2 3 1 |       | b14 b10 b6 b2 |				| c14 c10 c6 c2 |
-		| 1 1 2 3 |   *   | b13 b9  b5 b1 |   = 	| c13 c9  c5 c1 |
-		| 3 1 1 2 |       | b12 b8  b4 b0 |				| c12 c8  c4 c0 |	
-		 */
-		 
 		 //This function defines the false 2x multiplication function, 
 		//which is a left shift by one bit and an XOR with 0x1B if the carry out flag is up. 
 		function automatic logic [7:0] x2
@@ -343,6 +280,13 @@ endmodule: tb_top
 			(input logic [7:0]  x);
 			 return (x[7] ? x<<1^8'h1b : {x<<1})^x;
 		endfunction;
+
+		/* 	Graphical representation of the Mixcolumn operation.
+		| 2 3 1 1 |       | b15 b11 b7 b3 |				| c15 c11 c7 c3 |
+		| 1 2 3 1 |       | b14 b10 b6 b2 |				| c14 c10 c6 c2 |
+		| 1 1 2 3 |   *   | b13 b9  b5 b1 |   = 	| c13 c9  c5 c1 |
+		| 3 1 1 2 |       | b12 b8  b4 b0 |				| c12 c8  c4 c0 |	
+		 */
 
 		assign mixcol_out[15]  = x2(mixcol_in[15])  ^ x3(mixcol_in[14])  	^    mixcol_in[13]   ^ 	  mixcol_in[12] ;
 		assign mixcol_out[14]  =    mixcol_in[15]   ^ x2(mixcol_in[14])  	^ x3(mixcol_in[13])  ^    mixcol_in[12] ;
