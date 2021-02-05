@@ -71,6 +71,8 @@
 		//	logic  [3:0][3:0][7:0]	round_key; Real variable for later use.							
 		//outputs
 		logic [15:0][7:0] 			round_out;
+		logic [10:0] 						fin_counter_out, fin_counter_in;
+		
 	
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////Bit stuffing section - fake inputs///////////////////////////////////////////////////
@@ -79,66 +81,18 @@
 //the output of the plaintext's XOR with the 0th RoundKey or the output from the previous round.////////////////////////////////
 
 
-			logic [14:0][127:0] key_words; 
+			logic [10:0][127:0] key_words; 
 			
-			//key_words generated from true key 'hD9DA7BEA1A31D8ABE2A27B4E855C5C5C50ED00C48388EA9B KeyExpansion.m
+			//key_words generated from true key 'AB7F34AFDD7382220E089AFB3D909866' KeyExpansion.m
 			/*
 			Software key generation commands:
-			KeyExpansion( 'key' , 4 ); //4 for 128 bits, 6 for 192 bits, 8 for 256 bits
-			dec2hex(ans);
+			KeyExpansion( 'key' , 4 );
+			hex2dec(ans);
 			ans';
 			reshape(ans,32,[]);
 			ans'
 			*/
 			
-const logic [127:0] plain_text = '{ 128'hD005A3321BBF085C2BC611AE8820839D};   //Generated via matlab: binaryVectorToHex(ceil(rand(1,128)-.5))
-
-logic [255:0] true_key;
-	assign true_key = 256'h27ECB2E3A5EE3894885B5289307400E398546B83039E89EED41DC9E5F9AC1751;  //This is a fake input, which is 256 bits long with 256 bits.  
-
-assign key_words = '{128'h27ECB2E3A5EE3894885B5289307400E3,
-    128'h98546B83039E89EED41DC9E5F9AC1751,
-    128'hB71C637A12F25BEE9AA90967AADD0984,
-    128'h34956ADC370BE332E3162AD71ABA3D86,
-    128'h413B27D853C97C36C960755163BD7CD5,
-    128'hCFEF7ADFF8E499ED1BF2B33A01488EBC,
-    128'h172242A444EB3E928D8B4BC3EE363716,
-    128'hE7EAE0981F0E797504FCCA4F05B444F3,
-    128'h92394FCFD6D2715D5B593A9EB56F0D88,
-    128'h3242375C2D4C4E2929B084662C04C095,
-    128'h708365BEA65114E3FD082E7D486723F5,
-    128'h60C711BA4D8B5F93643BDBF5483F1B60,
-    128'h252CB5EC837DA10F7E758F723612AC87,
-    128'h650E80AD2885DF3E4CBE04CB04811FAB,
-    128'h69ECD71EEA91761194E4F963A2F655E4};
-
-///////////////192 bit verification/////////////////////////////////////////
-/* 
-			const logic [127:0] plain_text = '{ 128'hD005A3321BBF085C2BC611AE8820839D};
-			
-	logic [255:0] true_key;
-	assign true_key = 256'hD9DA7BEA1A31D8ABE2A27B4E855C5C5C50ED00C48388EA9B;  //This is a fake input, which is 256 bits long but only has 192 nonzero bits.  
-
- // The true key is 192'hD9DA7BEA1A31D8ABE2A27B4E855C5C5C50ED00C48388EA9B'
-    assign key_words = '{192'hD9DA7BEA1A31D8ABE2A27B4E855C5C5C,
-    192'h50ED00C48388EA9B1C5D6F06066CB7AD,
-    192'hE4CECCE3619290BF317F907BB2F77AE0,
-    192'h76878E3170EB399C9425F57FF5B765C0,
-    192'hC4C8F5BB763F8F5B07F4B709771F8E95,
-    192'hE33A7BEA168D1E2AD245EB91A47A64CA,
-    192'hD5B7C340A2A84DD54192363F571F2815,
-    192'h855AC3842120A74E72EBECBDD043A168,
-    192'h91D19757C6CEBF4243947CC662B4DB88,
-    192'hDF5228170F11897F9EC01E28580EA16A,
-    192'h1B9ADDAC792E0624AE3D1EA1A12C97DE,
-    192'h3FEC89F667E2289C7C78F5300556F314,
-    192'h9F30E4CA3E1C731401F0FAE26612D27E}; // fake, for use in bit stuffing.   */
-////end 192 bit verification///////////////////////////////////////////////////////		
-	
-////////128 bit verification///////////////////////////////////////////////////////
-/* logic [255:0] true_key;
-	assign true_key = 256'hAB7F34AFDD7382220E089AFB3D909866;  //This is a fake input, which is 256 bits long but only has 128 nonzero bits.  
-
 			const logic [127:0] plain_text = '{ 128'h50ED00C48388EA9B0FB7C204C2C12D39};   //Generated via matlab: binaryVectorToHex(ceil(rand(1,128)-.5))
 
 			assign key_words = '{128'hAB7F34AFDD7382220E089AFB3D909866, 128'hCA390788174A85AA19421F5124D28737,
@@ -146,9 +100,7 @@ assign key_words = '{128'h27ECB2E3A5EE3894885B5289307400E3,
 													 128'h32CF69219E48ACD041E96E64C9BC2CA2, 128'h47BE53FCD9F6FF2C981F914851A3BDEA,
 													 128'h6DC4D42DB4322B012C2DBA497D8E07A3, 128'h3401DED28033F5D3AC1E4F9AD1904839,
 													 128'hD453CCEC5460393FF87E76A529EE3E9C, 128'hE7E11249B3812B764BFF5DD36211634F,
-													 128'h531A96E3E09BBD95AB64E046C9758309}; //FAKE for use in spoon feeding. 											 
- */
-////end 128 bit verification///////////////////////////////////////////////////////
+													 128'h531A96E3E09BBD95AB64E046C9758309}; //FAKE for use in spoon feeding. 			
 
 
 			logic ready;
@@ -157,7 +109,7 @@ assign key_words = '{128'h27ECB2E3A5EE3894885B5289307400E3,
 		
 		
 		logic keyflag_128, keyflag_192, keyflag_256, start_flag, fin_flag;
-	//	logic [255:0] true_key;  //True key is presently inactive because I'm feeding the keys directly as fake inputs.  
+		logic [255:0] true_key;  //True key is presently inactive because I'm feeding the keys directly as fake inputs.  
 		logic [127:0] round_recycle, round_in;
 		logic [14:0] round_count, next_round_count;
 		logic [127:0] aes_out;
@@ -170,9 +122,9 @@ assign key_words = '{128'h27ECB2E3A5EE3894885B5289307400E3,
 																				//This may create more problems for me later since i make other round based decisions based on round_count and if it's one bit further than it 
 																				//should be this creates issues.  
 		rregs #(128)  finfl ( round_recycle , round_out , eph1);
-		rregs #(128) cyc    ( aes_out , round_out , fin_flag& ~eph1); //spits out the actual AES cyphertext.  Cheapest copout ever with timing on the ~eph1 here.  TIMING issue, discuss!
-		assign round_in = start_flag ? plain_text^key_words[14] : round_recycle ; //bugs here, wrong number of bits + unsure of what true_key is supposed to do.  Shouldn't this be the plain text?
-																																							//key_words[14] is used for fake inputs, to be replaced with [0] with keyexpansion.sv.
+		rregs #(128) cyc    ( aes_out , round_out , fin_flag); //spits out the actual AES cyphertext.
+		assign round_in = start_flag ? plain_text^key_words[10] : round_recycle ; //bugs here, wrong number of bits + unsure of what true_key is supposed to do.  Shouldn't this be the plain text?
+																																							//key_words[14] is fake, it should be whatever the true key is in real life.  
 		//////////////////////////////////////////////////////////////////////////////////////	///////////////////////////////////////////////////////////////////////////
 		//This section times the fin_flag, the purpose of which is to tell the machine that it has reached the final round of AES.  The fin flag should rise
 		//after either 10, 12, or 14 rounds depending on the key length.  
@@ -187,13 +139,12 @@ assign key_words = '{128'h27ECB2E3A5EE3894885B5289307400E3,
 		
 		assign next_round_count = {round_count<<1};
 
-		rregs  #(15) cons ( round_count , next_round_count , eph1); //there may be timing issues where I'm either ahead or behind by one clock cycle.
+		rregs  #(14) cons ( round_count , next_round_count , eph1); //there may be timing issues where I'm either ahead or behind by one clock cycle.
 		
-				rmuxd4 #(1) finr ( fin_flag,    //When the 1 reaches a certain index in the shifter, the fin flag is raised and this is the last round.  
+				rmuxd3 #(1) finr ( fin_flag,    //When the 1 reaches a certain index in the shifter, the fin flag is raised and this is the last round.  
 					keyflag_256, round_count[14],
 					keyflag_192, round_count[12],
-					keyflag_128, round_count[10], 
-					1'b0	
+					round_count[10] //keyflag_128, counter[9]	
 		);
 		/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////		
 		
@@ -208,10 +159,11 @@ assign key_words = '{128'h27ECB2E3A5EE3894885B5289307400E3,
 																															//in the aes module.  
 		rregs #(4) ksdk (round_index, round_index_next, ready&eph1);
 		
-		assign round_key = key_words[14-round_index];								//key_words is the entire register vector in keyexpansion.sv.  For fake inputs I'm using [round size]-round_index,
-																																//but the actual output from keyexpansion.sv will be reversed, so the argument will reduce to round_index.  
+		assign round_key = key_words[10-round_index];								//key_words is the entire register vector in keyexpansion.sv.  Used 11- for now, will have to rearrainge.  
 		/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 		
+
+	
 		
 	aesround aes (
 		.eph1         				(eph1),

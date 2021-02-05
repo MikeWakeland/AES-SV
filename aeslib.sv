@@ -810,8 +810,15 @@ end
 endmodule: rf_1rw
 
 
+//This is a counter that I ripped off the internet.  Behavioral.  
+module counter(
+		output logic [3:0] count_out,
+    input  logic [3:0] count_in,
+		input  logic clk    
+);
 
-
+always @(posedge clk) count_out <= count_in + 1;     //     always_ff @(posedge clk) q <= d;
+endmodule: counter
 
 
 
