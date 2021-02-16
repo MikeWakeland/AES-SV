@@ -104,7 +104,7 @@
 		logic		[3:0][7:0]				g_out, g_in, word_sbox, word_shift;
 		logic 	[10:0] 						old_constant, new_constant;
 		logic 	[7:0] 						round_prefix;
-		logic 	[127:0] 					r0k, r1k, r2k, r3k, r4k, r5k, r6k, r7k, r8k, r9k, r10k, r11k;	
+		logic 	[127:0] 					r0k, r1k, r2k, r3k, r4k, r5k, r6k, r7k, r8k, r9k, r10k, r11k, r12k, r13k, r14k;	
 	
 		//////////////////////////////G function. 
 		//This section describes the G function in AES, which takes the least significant 4x32 bit key word from the previous round as an input.
@@ -165,8 +165,12 @@
 			initial r0k = 128'b0;
 			assign ready = |r0k; //this tells the key expansion that the flag is up and the keys are ready to be used.  
 
-			rregs #(128) key11 ( r11k , key_gen , eph1 );
-			assign last_rounds_words = r11k;
+			
+			rregs #(128) key14 ( r14k , key_gen , eph1 );
+			assign last_rounds_words = r14k;			
+			rregs #(128) key13 ( r13k , r14k , eph1 );			
+			rregs #(128) key12 ( r12k , r13k , eph1 );			
+			rregs #(128) key11 ( r11k , r12k , eph1 );
 			rregs #(128) key10 ( r10k , r11k , eph1 );
 			rregs #(128) key9  ( r9k  , r10k , eph1 );
 			rregs #(128) key8  ( r8k  , r9k  , eph1 );
@@ -180,7 +184,7 @@
 			rregs #(128) key0  ( r0k  , r1k  , eph1 );
 			
 			//administrative assignment to the output for easier indexing.
-			assign key_words = {r11k, r10k, r9k, r8k, r7k, r6k, r5k, r4k, r3k, r2k, r1k, r0k};
+			assign key_words = {r14k, r13k, r12k, r11k, r10k, r9k, r8k, r7k, r6k, r5k, r4k, r3k, r2k, r1k, r0k};
 			
 			endmodule: keyschedule
 			
