@@ -44,18 +44,22 @@
 
 
 //--params to aesround
-		logic [15:0][7:0] 			aes_out;
+		logic [15:0][7:0] 			aes_out_r;
+		logic										fin_flag_r;
 	
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////Bit stuffing section - fake inputs///////////////////////////////////////////////////
 ///At this point every fake input is comes as an output wire from keyexpansion.sv, so keyexpansion's outputs are therefore/////
 ///already defined.////////////////////////////////////////////////////////////////////////////////////////////////////////////
-			
+		
+		logic [1:0] key_size;
+		assign key_size = 2'b01;
+		
 		logic [127:0] plain_text;
 		assign plain_text = 128'h00112233445566778899aabbccddeeff;   //Generated via matlab: binaryVectorToHex(ceil(rand(1,128)-.5))
 
 		logic [255:0] true_key;
-		assign true_key = 256'h000102030405060708090a0b0c0d0e0f1011121314151617;  //This is a fake input, which is 256 bits long with 256 bits.  
+		assign true_key =	  256'h000102030405060708090a0b0c0d0e0f1011121314151617;  //This is a fake input, which is 256 bits long with 192 bits.  
 
 
 		logic [15:1][127:0] key_words;   //from 15:1 instead of 14:0 to conveniently index at round_key's index [key_words].
@@ -85,25 +89,27 @@
 				128'h650E80AD2885DF3E4CBE04CB04811FAB,
 				128'h69ECD71EEA91761194E4F963A2F655E4};
 
-			logic ready;
-			assign ready = 1'b1;  //the ready flag will come from keyexpansion.sv when the last round_key has generated, telling AES that it can begin.
-			
+			logic ready, t1, t2;
+			rregs #(1) temp1 (t1, ~reset ,eph1);
+			rregs #(1) temp2 (t2, t1, eph1);
+			assign ready = t1^t2;  //the ready flag will come from keyexpansion.sv when the last round_key has generated, telling AES that it can begin.
+														 //this fake input is a hamhanded way of making sure ready is up for one clock cycle.  
 /////////////////////////////////////////////////////End fake input section///////////////////////////////////////////////////////		
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 			aes aesist (  										//This module instantiates all of AES, which takes only fake inputs and spits out only real results.   
-				.eph1         				(eph1),
-				.reset        				(reset),
-				.start 								(start),
+				.eph1         					(eph1),
+				.reset        					(reset),
+				.start 									(start),
 
-				.ready 								(ready),
-				.plain_text						(plain_text),
-				.true_key        			(true_key),    
-				.key_words   					(key_words),
+				.ready_i 								(ready),
+				.plain_text_i						(plain_text),
+				.key_size_i							(key_size),//.true_key        			(true_key),    
+				.key_words_i   					(key_words),
 
-				.fin_flag							(fin_flag),
-				.aes_out  						(aes_out)   
+				.fin_flag_r							(fin_flag_r),
+				.aes_out_r  						(aes_out_r)   
 		); 
 
 
@@ -116,24 +122,23 @@ endmodule: tb_top
 				input logic										reset,
 				input logic										start,
 
-				input logic										ready,
-				input logic  [127:0]					plain_text,
-				input logic	 [255:0]					true_key,
-				input logic  [15:1][127:0] 		key_words,
+				input logic										ready_i,
+				input logic  [127:0]					plain_text_i,
+				input logic  [1:0]						key_size_i, 
+				input logic  [15:1][127:0] 		key_words_i,
 				
-				output logic									fin_flag,
-				output logic [127:0] 					aes_out
+				output logic									fin_flag_r,
+				output logic [127:0] 					aes_out_r
 		 
 		 );
 		 
  		/////////////////////////////////////////////////////////AES Admiinistration//////////////////////////////////////////////////////////////////////////////////
 		//This section handles all of the round counters, key inputs, and flags required to control AES' inputs and outputs.  Acual executiion begins at AES Round////
  
- 		logic keyflag_128, keyflag_192, keyflag_256, start_flag; 
-		logic [127:0] round_recycle, round_in, aes_out;
+ 		logic 				keyflag_128, keyflag_192, keyflag_256, start_flag; 
+		logic [127:0] round_recycle, round_in, round_out, aes_out;
 		logic [127:0] round_key;
-		logic [3:0] round_index, round_index_next;
-				
+		
 		//This is the hard coded  Rijndael S-Box for use in AES.  Indicies are row major.   	
 		//AES indexes the S-Box in the opposite manner, so the S-BOX is reversed so it can be referenced more 
 		//efficiently using hardware. This SBOX behaves correctly according to the AES standard, with an index input of 8'b0 
@@ -158,23 +163,34 @@ endmodule: tb_top
 			8'hc0, 8'h72, 8'ha4, 8'h9c, 8'haf, 8'ha2, 8'hd4, 8'had, 8'hf0, 8'h47, 8'h59, 8'hfa, 8'h7d, 8'hc9, 8'h82, 8'hca,
 			8'h76, 8'hab, 8'hd7, 8'hfe, 8'h2b, 8'h67, 8'h01, 8'h30, 8'hc5, 8'h6f, 8'h6b, 8'hf2, 8'h7b, 8'h77, 8'h7c, 8'h63 }; 	
 	
+	
+				//Register inputs for timing purposes.  start, reset, and eph1 not registered.  
+		 logic										ready;
+		 logic  [127:0]						plain_text;
+		 logic  [1:0]							key_size; 
+		 logic  [15:1][127:0] 		key_words;
+
+		rregs #(1) 		rdyi 	(ready, ready_i, eph1);
+		rregs #(128)	pti 	(plain_text, plain_text_i, eph1);
+		rregs #(2)		ksi 	(key_size, key_size_i, eph1);
+		rregs #(1920) kwi 	(key_words, key_words_i, eph1);
 
 
-		rregs #(1) kdked (start_flag , start, eph1); // start to be replaced by "ready" after the completion of keyexpansion. "ready" will be zero except for the first c/c 
-																								 // after completing key expansion, which will be one.  
+		rregs #(1) kdked (start_flag , reset ? '0 : ready, eph1); // start to be replaced by "ready" after the completion of keyexpansion. "ready" will be zero except for the first c/c 
+																															// after completing key expansion, which will be one.  
 		
-		rregs #(128)  finfl ( round_recycle , aes_out , eph1);
-		
+		rregs #(128)  rnrec ( round_recycle , round_out , eph1);
+		assign aes_out_r = fin_flag_r ? round_recycle : '0; 													//Captures the registered value of round out as the final output, avoiding another register.    		
+		rregs #(1) 		finfl  (fin_flag_r, reset ? '0 : fin_flag, eph1);				 //delays fin_flag by one c/c to match timing with the proper aes output.  
 		assign round_in = start_flag ? plain_text^key_words[15] : round_recycle ; //selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
 																																																																														
 		//////////////////////////////////////////////////////////////////////////////////////	///////////////////////////////////////////////////////////////////////////
 		//This section times the fin_flag, the purpose of which is to tell the machine that it has reached the final round of AES.  The fin flag should rise
 		//after either 10, 12, or 14 rounds depending on the key length.  
-		//Decides what size the key is based on the inputs to the full sized (256 bit) input.  
-		//The key is assumed to be of lower length if the Most of next Most significant 64 bits are all zeroes.
-		assign keyflag_256 =	 |true_key[255:192];  
-		assign keyflag_192 =  ~|true_key[255:192] & (|true_key[191:128]);
-		assign keyflag_128 =  ~(keyflag_256 | keyflag_192);
+		//Decides what size the key is based on the user's input. Have to initialize at zero due to registered user input.   
+		assign keyflag_256 =	reset ? '0 : key_size[1];								 	 //1X
+		assign keyflag_192 =  reset ? '0 : ~key_size[1] & key_size[0];	 //01
+		assign keyflag_128 =  reset ? '0 : ~|key_size;									 //00
 				
 		rmuxd4 #(1) finr 	 ( fin_flag,          //Raises the fin_flag when downcounter cycle_ctr reaches the appropriate value based on the key size.  
 					keyflag_256, ( cycle_ctr == 4'b1 ),
@@ -186,7 +202,7 @@ endmodule: tb_top
 		 //Downcounter starts at 14d, counts down every clock.  The value is used to index key_words[] to pull the key from keyexpansion.sv
 		 logic [3:0] cycle_ctr_pr, div_clks, cycle_ctr;
 		 assign div_clks = 4'he;
-		 assign  cycle_ctr = start_flag ? div_clks : (cycle_ctr_pr!='0 ? cycle_ctr_pr - 1'b1 : 3'hf);
+		 assign  cycle_ctr = reset | start_flag ? div_clks : (cycle_ctr_pr!='0 ? cycle_ctr_pr - 1'b1 : 3'hf); 
 		 rregs #(4) cycr (cycle_ctr_pr, cycle_ctr, eph1);	
 				
 		assign round_key = key_words[cycle_ctr];		
@@ -287,8 +303,9 @@ endmodule: tb_top
 			//direct vector XOR is feasible because both the MixColumns output and roundkey input are orientated in the same way.
 			//The mux selects shiftrows or mixcol as an input.  The impact is to skip MixColumns if this is the last AES round. 
 			//This is also the final ciphertext output, but is only valid for the c/c that fin_flag is up.  
-		assign aes_out = ( fin_flag ? shiftrows_out : mixcol_out)^round_key; 
- 
+		assign round_out = ( fin_flag ? shiftrows_out : mixcol_out)^round_key; 
+	
+		
  
  endmodule: aes
  
