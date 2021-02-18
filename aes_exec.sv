@@ -180,10 +180,10 @@ endmodule: tb_top
 																															// after completing key expansion, which will be one.  
 		
 		rregs #(128)  rnrec ( round_recycle , round_out , eph1);
-		assign aes_out_r = fin_flag_r ? round_recycle : '0; 													//Captures the registered value of round out as the final output, avoiding another register.    		
-		rregs #(1) 		finfl  (fin_flag_r, reset ? '0 : fin_flag, eph1);				 //delays fin_flag by one c/c to match timing with the proper aes output.  
 		assign round_in = start_flag ? plain_text^key_words[15] : round_recycle ; //selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
-																																																																														
+		assign aes_out_r = fin_flag_r ? round_recycle : '0; 									 		//Captures the registered value of round out as the final output, avoiding another register.    		
+		rregs #(1) 		finfl  (fin_flag_r, reset ? '0 : fin_flag, eph1);				 		//delays fin_flag by one c/c to match timing with the proper aes output.  				
+		
 		//////////////////////////////////////////////////////////////////////////////////////	///////////////////////////////////////////////////////////////////////////
 		//This section times the fin_flag, the purpose of which is to tell the machine that it has reached the final round of AES.  The fin flag should rise
 		//after either 10, 12, or 14 rounds depending on the key length.  
