@@ -49,21 +49,29 @@
 	
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////Bit stuffing section - fake inputs///////////////////////////////////////////////////
-///At this point every fake input is comes as an output wire from keyexpansion.sv, so keyexpansion's outputs are therefore/////
-///already defined.////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		
+		/*
+		The fake inputs correspond to the user's inputs.  There are only three sets.
+		i.		The key_size, which is a two bit user input.  00 for a 128' key, 01 for a 192' key, and 11|10 for a 256' key. 
+		ii. 	The plain_text, which is the data to be encrypted. 128' binary no restrictions.
+		iii. 	key_words, which are the expanded keys used in rounds.  They are based on the true key, which is not directly used.
+		iv.		ready, which is a 1' flag from the keyexpansion module.  @ posedge ready AES will consider that set of plaintext and expanded keys to be valid. The
+					fake implementation of the ready flag is contrived.  The actual ready flag will flick to HIGH and remain high. 
+					
+		The module will correctly compute AES outputs of any key length if the fake inputs are used correctly.  
+		*/
 		
 		logic [1:0] key_size;
-		assign key_size = 2'b01;
+		assign key_size = 2'b10;
 		
 		logic [127:0] plain_text;
 		assign plain_text = 128'h00112233445566778899aabbccddeeff;   //Generated via matlab: binaryVectorToHex(ceil(rand(1,128)-.5))
 
-		logic [255:0] true_key;
-		assign true_key =	  256'h000102030405060708090a0b0c0d0e0f1011121314151617;  //This is a fake input, which is 256 bits long with 192 bits.  
 
-
-		logic [15:1][127:0] key_words;   //from 15:1 instead of 14:0 to conveniently index at round_key's index [key_words].
-			//key_words generated from true key KeyExpansion.m
+		// The true key is: 256'hEBA02E379817D636A144551DF49ADE37F01F2E724AC0AB35BE3A20FF7A7D7FCA, for reference purposes only.
+		logic [15:1][127:0] key_words;   
+			//from 15:1 instead of 14:0 to conveniently index at round_key's index [key_words].
 			/*
 			Software key generation commands:
 			KeyExpansion( 'key' , 4 ); //4 for 128 bits, 6 for 192 bits, 8 for 256 bits
@@ -73,21 +81,22 @@
 			ans'
 			*/
 			//The key words are arrainged such the first key_word (128'h00010...) is index [15].
-		assign key_words = '{128'h000102030405060708090A0B0C0D0E0F,
-				128'h10111213141516175846F2F95C43F4FE,
-				128'h544AFEF55847F0FA4856E2E95C43F4FE,
-				128'h40F949B31CBABD4D48F043B810B7B342,
-				128'h58E151AB04A2A5557EFFB5416245080C,
-				128'h2AB54BB43A02F8F662E3A95D66410C08,
-				128'hF501857297448D7EBDF1C6CA87F33E3C,
-				128'hE510976183519B6934157C9EA351F1E0,
-				128'h1EA0372A995309167C439E77FF12051E,
-				128'hDD7E0E887E2FFF68608FC842F9DCC154,
-				128'h859F5F237A8D5A3DC0C02952BEEFD63A,   
-				128'hDE601E7827BCDF2CA223800FD8AEDA32,
-				128'hA4970A331A78DC09C418C271E3A41D5D,
-				128'h650E80AD2885DF3E4CBE04CB04811FAB,
-				128'h69ECD71EEA91761194E4F963A2F655E4};
+		assign key_words = '{
+				128'hEBA02E379817D636A144551DF49ADE37,
+				128'hF01F2E724AC0AB35BE3A20FF7A7D7FCA,
+				128'h15725AED8D658CDB2C21D9C6D8BB07F1,
+				128'h91F5EBD3DB3540E6650F60191F721FD3,
+				128'h57B23C2DDAD7B0F6F6F669302E4D6EC1,
+				128'hA01674AB7B23344D1E2C5454015E4B87,
+				128'h0B012B51D1D69BA72720F297096D9C56,
+				128'hA12AAA1ADA099E57C425CA03C57B8184,
+				128'h220D74F7F3DBEF50D4FB1DC7DD968191,
+				128'h60BAA69BBAB338CC7E96F2CFBBED734B,   
+				128'h6782C71D9459284D40A2358A9D34B41B,
+				128'h3EA22B34841113F8FA87E137416A927C,
+				128'h45CDD79ED194FFD39136CA590C027E42,
+				128'hC0D5D81844C4CBE0BE432AD7FF29B8AB,
+				128'hA0A1B58871354A5BE0038002EC01FE40};
 
 			logic ready, t1, t2;
 			rregs #(1) temp1 (t1, ~reset ,eph1);
@@ -105,7 +114,7 @@
 
 				.ready_i 								(ready),
 				.plain_text_i						(plain_text),
-				.key_size_i							(key_size),//.true_key        			(true_key),    
+				.key_size_i							(key_size),  
 				.key_words_i   					(key_words),
 
 				.fin_flag_r							(fin_flag_r),
@@ -165,19 +174,20 @@ endmodule: tb_top
 	
 	
 				//Register inputs for timing purposes.  start, reset, and eph1 not registered.  
-		 logic										ready;
+		 logic										ready, rdy_reg;
 		 logic  [127:0]						plain_text;
 		 logic  [1:0]							key_size; 
 		 logic  [15:1][127:0] 		key_words;
 
 		rregs #(1) 		rdyi 	(ready, ready_i, eph1);
+		rregs #(1) 		rdyreg (rdy_reg, reset ? '0 : ready, eph1); //rdy_reg exists to ensure that start_flag is only up for one c/c, which is the clock immediately after 
+																															//AES receives the positive edge of the ready flag input.  
 		rregs #(128)	pti 	(plain_text, plain_text_i, eph1);
 		rregs #(2)		ksi 	(key_size, key_size_i, eph1);
 		rregs #(1920) kwi 	(key_words, key_words_i, eph1);
 
 
-		rregs #(1) kdked (start_flag , reset ? '0 : ready, eph1); // start to be replaced by "ready" after the completion of keyexpansion. "ready" will be zero except for the first c/c 
-																															// after completing key expansion, which will be one.  
+		rregs #(1) kdked (start_flag , reset ? '0 : ready^rdy_reg, eph1); 
 		
 		rregs #(128)  rnrec ( round_recycle , round_out , eph1);
 		assign round_in = start_flag ? plain_text^key_words[15] : round_recycle ; //selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
