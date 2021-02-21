@@ -178,15 +178,17 @@ endmodule: tb_top
 		 logic  [127:0]						plain_text;
 		 logic  [1:0]							key_size; 
 		 logic  [15:1][127:0] 		key_words;
-
+			
+		//Register inputs for timing. 	
 		rregs #(1) 		rdyi 	(ready, ready_i, eph1);
 		rregs #(1) 		rdyreg (rdy_reg, reset ? '0 : ready, eph1); //rdy_reg exists to ensure that start_flag is only up for one c/c, which is the clock immediately after 
 																															//AES receives the positive edge of the ready flag input.  
-		rregs #(128)	pti 	(plain_text, plain_text_i, eph1);
-		rregs #(2)		ksi 	(key_size, key_size_i, eph1);
+		rregs #(128)	pti 	(plain_text, plain_text_i, eph1);		
+		rregs #(2)		ksi 	(key_size, key_size_i, eph1);					
 		rregs #(1920) kwi 	(key_words, key_words_i, eph1);
 
 
+		//Works with ready and rdy_reg to provide the start signal to AES
 		rregs #(1) kdked (start_flag , reset ? '0 : ready^rdy_reg, eph1); 
 		
 		rregs #(128)  rnrec ( round_recycle , round_out , eph1);
