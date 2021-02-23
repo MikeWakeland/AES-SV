@@ -1,11 +1,3 @@
-	/*	//tasks to perform,
-	
-		1.  Replace fin counter with fin flag.
-		2.  Support 196 and 256 bit keys. 
-		3.  
-		
-	*/	
-		
 		`include "aes_hdr.sv"
 		`include "aeslib.sv"
 		`define SIM  //tick commands are commands to the tools.  Tells the tools that it should go to these files and grab whats in there.  
@@ -41,8 +33,6 @@
 		rregs resetr (reset_r, reset , eph1);
 		assign start = ~reset & (reset_r ^ reset);
 		
-
-
 //--params to aesround
 		logic [15:0][7:0] 			aes_out_r;
 		logic										fin_flag_r;
@@ -145,7 +135,7 @@ endmodule: tb_top
 		//This section handles all of the round counters, key inputs, and flags required to control AES' inputs and outputs.  Acual executiion begins at AES Round////
  
  		logic 				keyflag_128, keyflag_192, keyflag_256, start_flag; 
-		logic [127:0] round_recycle, round_in, round_out, aes_out;
+		logic [127:0] round_recycle, round_in, round_out;
 		logic [127:0] round_key;
 		
 		//This is the hard coded  Rijndael S-Box for use in AES.  Indicies are row major.   	
