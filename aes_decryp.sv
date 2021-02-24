@@ -22,6 +22,124 @@ AddRoundKey(state, w[0, Nb-1])
 out
 
 */
+		`include "aes_hdr.sv"
+		`include "aeslib.sv"
+		`define SIM  //tick commands are commands to the tools.  Tells the tools that it should go to these files and grab whats in there.  
+
+		//----------------------------------------------
+		`timescale 1ns/1ps
+		module tb_top ();
+ 
+		//----------------------------------------------
+ 
+	 localparam MAX_CLKS = 5;
+
+	 //--clock gen
+	 logic eph1; 
+	 always 
+			begin
+					eph1  = 1'b1;
+					#1; 
+					eph1 = 1'b0; 
+					#1; 
+			end			
+
+		int random_num;
+		logic start, reset, reset_r;
+		initial begin
+				reset  = 1;
+				$display("Starting Proc Simulation");
+				random_num = $random(1);
+	 
+				repeat(2) @(posedge eph1);
+				#1 reset= '0;
+		end
+		rregs resetr (reset_r, reset , eph1);
+		assign start = ~reset & (reset_r ^ reset);
+		
+//--params to aesround
+		logic [15:0][7:0] 			aes_out_r;
+		logic										fin_flag_r;
+	
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////Bit stuffing section - fake inputs///////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		
+		/*
+		The fake inputs correspond to the user's inputs.  There are only three sets.
+		i.		The key_size, which is a two bit user input.  00 for a 128' key, 01 for a 192' key, and 11|10 for a 256' key. 
+		ii. 	The plain_text, which is the data to be encrypted. 128' binary no restrictions.
+		iii. 	key_words, which are the expanded keys used in rounds.  They are based on the true key, which is not directly used.
+		iv.		ready, which is a 1' flag from the keyexpansion module.  @ posedge ready AES will consider that set of plaintext and expanded keys to be valid. The
+					fake implementation of the ready flag is contrived.  The actual ready flag will flick to HIGH and remain high. 
+					
+		The module will correctly compute AES outputs of any key length if the fake inputs are used correctly.  
+		*/
+		
+		logic [1:0] key_size;
+		assign key_size = 2'b00;
+		
+		logic [127:0] cipher_text;
+		assign cipher_text = 128'h69c4e0d86a7b0430d8cdb78070b4c55a;   //Generated via matlab: binaryVectorToHex(ceil(rand(1,128)-.5))
+
+
+		// The true key is: 256'h000102030405060708090a0b0c0d0e0f, for reference purposes only.
+		logic [15:1][127:0] key_words;   
+			//from 15:1 instead of 14:0 to conveniently index at round_key's index [key_words].
+			/*
+			Software key generation commands:
+			KeyExpansion( 'key' , 4 ); //4 for 128 bits, 6 for 192 bits, 8 for 256 bits
+			dec2hex(ans);
+			ans';
+			reshape(ans,32,[]);
+			ans'
+			*/
+			//The key words are arrainged such the first key_word (128'h00010...) is index [15].
+		assign key_words = '{
+				128'h000102030405060708090A0B0C0D0E0F,
+				128'hD6AA74FDD2AF72FADAA678F1D6AB76FE,
+				128'hB692CF0B643DBDF1BE9BC5006830B3FE,
+				128'hB6FF744ED2C2C9BF6C590CBF0469BF41,
+				128'h47F7F7BC95353E03F96C32BCFD058DFD,
+				128'h3CAAA3E8A99F9DEB50F3AF57ADF622AA,
+				128'h5E390F7DF7A69296A7553DC10AA31F6B,
+				128'h14F9701AE35FE28C440ADF4D4EA9C026,
+				128'h47438735A41C65B9E016BAF4AEBF7AD2,
+				128'h549932D1F08557681093ED9CBE2C974E,   
+				128'h13111D7FE3944A17F307A78B4D2B30C5,
+				128'h0,
+				128'h0,
+				128'h0,
+				128'h0};
+
+			logic ready;
+
+			assign ready = ~reset; //Ready will eventually have to be changed to be the out_ flag from the aes encrytpion round, but for now this is fine.  
+/////////////////////////////////////////////////////End fake input section///////////////////////////////////////////////////////		
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+			aesdecrypt aesdec (  										//This module instantiates all of AES, which takes only fake inputs and spits out only real results.   
+				.eph1         					(eph1),
+				.reset        					(reset),
+				.start 									(start),
+
+				.ready_i 								(ready),
+				.cipher_i								(cipher_text),
+				.key_size_i							(key_size),  
+				.key_words_i   					(key_words),
+
+				.fin_flag_d							(fin_flag_r),
+				.plain_out  						(aes_out_r)   
+		); 
+
+
+endmodule: tb_top
+
+
+
+
+
 
 		 module aesdecrypt (
 		 
@@ -81,7 +199,7 @@ const logic [255:0][7:0] INVSBOX = '{
 		rregs #(1) kdkedd (start_flag , reset ? '0 : ready^rdy_reg, eph1); 
 		
 		rregs #(128)  rnrecd ( round_recycle , round_out , eph1);
-		assign round_in = start_flag ? plain_text^key_words[15] : round_recycle ; //selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
+		assign round_in = start_flag ? cipher_i^key_words[div_clks] : round_recycle ; //selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
 		assign plain_out = fin_flag_d ? round_recycle : '0; 									 		//Captures the registered value of round out as the final output, avoiding another register.    		
 		rregs #(1) 		finfld  (fin_flag_d, reset ? '0 : fin_flag, eph1);				 		//delays fin_flag by one c/c to match timing with the proper aes output.  				
 		
@@ -95,17 +213,30 @@ const logic [255:0][7:0] INVSBOX = '{
 		assign keyflag_192 =  reset ? '0 : ~key_size[1] & key_size[0];	 //01
 		assign keyflag_128 =  reset ? '0 : ~|key_size;									 //00
 				
-		rmuxd4 #(1) finrd 	 ( fin_flag,          //Raises the fin_flag when downcounter cycle_ctr reaches the appropriate value based on the key size.  
-					keyflag_256, ( cycle_ctr == 4'b1 ),
-					keyflag_192, ( cycle_ctr == 4'h3 ),
-					keyflag_128, ( cycle_ctr == 4'h5 ), 
+/* 		rmuxd4 #(1) finrd 	 ( fin_flag,          //Raises the fin_flag when downcounter cycle_ctr reaches the appropriate value based on the key size.  
+					keyflag_256, ( cycle_ctr == 4'he ), //1
+					keyflag_192, ( cycle_ctr == 4'hc ), //3
+					keyflag_128, ( cycle_ctr == 4'ha ), //5
 					1'b0	
-		);
+		); */
 		
-		 //Downcounter starts at 14d, counts down every clock.  The value is used to index key_words[] to pull the key from keyexpansion.sv
+		assign fin_flag = ( cycle_ctr == 4'hf ) ? 1'b1 : 1'b0; 
+		
+		 //Downcounter starts at 14d, counts down every clock.  I need to reverse the counter for decryption.
+		 
+		 
 		 logic [3:0] cycle_ctr_pr, div_clks, cycle_ctr;
-		 assign div_clks = 4'he;
-		 assign  cycle_ctr = reset | start_flag ? div_clks : (cycle_ctr_pr!='0 ? cycle_ctr_pr - 1'b1 : 3'hf); 
+
+
+		rmuxd4 #(4) ctrind ( div_clks,
+					keyflag_256, ( 4'h1 ), //e
+					keyflag_192, ( 4'h3 ),  //c
+					keyflag_128, ( 4'h5 ), //a
+					4'b0	
+		 );
+		 //If this doesn't work I should simply rearrainge the keywords vector using a simple reconcatenation.  
+
+		 assign  cycle_ctr = reset | start_flag ? div_clks + 1: (cycle_ctr_pr!='0 ? cycle_ctr_pr + 1'b1 : 4'h0);  //added +1 here, 
 		 rregs #(4) cycrd (cycle_ctr_pr, cycle_ctr, eph1);	
 				
 		assign round_key = key_words[cycle_ctr];		
@@ -126,12 +257,13 @@ const logic [255:0][7:0] INVSBOX = '{
 				| b12  b8   b4   b0   |			| b8    b4   b0   b12 |
 		*/		
 	
-		logic [15:0][7:0]    shiftrows_out; 	 
+		logic [15:0][7:0]    shiftrows_out, shiftrows_in;
+		assign shiftrows_in = round_in;
 			//i																			//ii																			//iii																			//iv
-		assign shiftrows_out[15] = round_in[15];	assign shiftrows_out[11] = round_in[11];	assign shiftrows_out[7] = round_in[7] ; 	assign shiftrows_out[3] = round_in[3] ;
-		assign shiftrows_out[14] = round_in[2] ;	assign shiftrows_out[10] = round_in[14];	assign shiftrows_out[6] = round_in[10];		assign shiftrows_out[2] = round_in[6] ;
-		assign shiftrows_out[13] = round_in[5] ;	assign shiftrows_out[9]  = round_in[1] ;	assign shiftrows_out[5] = round_in[13];		assign shiftrows_out[1] = round_in[9] ;
-		assign shiftrows_out[12] = round_in[8] ;	assign shiftrows_out[8]  = round_in[4] ;	assign shiftrows_out[4] = round_in[0] ;		assign shiftrows_out[0] = round_in[12];
+		assign shiftrows_out[15] = shiftrows_in[15];	assign shiftrows_out[11] = shiftrows_in[11];	assign shiftrows_out[7] = shiftrows_in[7] ; 	assign shiftrows_out[3] = shiftrows_in[3] ;
+		assign shiftrows_out[14] = shiftrows_in[2] ;	assign shiftrows_out[10] = shiftrows_in[14];	assign shiftrows_out[6] = shiftrows_in[10];		assign shiftrows_out[2] = shiftrows_in[6] ;
+		assign shiftrows_out[13] = shiftrows_in[5] ;	assign shiftrows_out[9]  = shiftrows_in[1] ;	assign shiftrows_out[5] = shiftrows_in[13];		assign shiftrows_out[1] = shiftrows_in[9] ;
+		assign shiftrows_out[12] = shiftrows_in[8] ;	assign shiftrows_out[8]  = shiftrows_in[4] ;	assign shiftrows_out[4] = shiftrows_in[0] ;		assign shiftrows_out[0] = shiftrows_in[12];
 
 
 
@@ -162,30 +294,30 @@ const logic [255:0][7:0] INVSBOX = '{
 		//which is three 2x functions followed by an XOR with the original value.
 		function automatic logic [7:0] x9
 			 (input logic [7:0]  x);
-			 logic [7:0] x2, x4, x8;
-			 assign x2=   x[7] ? (x<<1) ^(8'h1b) : x<<1;
-			 assign x4 = x2[7] ? (x2<<1)^(8'h1b) : x<<1;
-			 assign x8 = x4[7] ? (x4<<1)^(8'h1b) : x<<1;
+			 logic [7:0] x1, x2, x4, x8;
+			  x1 =  x;
+			  x2=  x1[7] ? (x1<<1)^(8'h1b) : x1<<1;
+			  x4 = x2[7] ? (x2<<1)^(8'h1b) : x2<<1;
+			  x8 = x4[7] ? (x4<<1)^(8'h1b) : x4<<1;
 				return (x8^x); 
 		endfunction;
 
 		//This function defines the false 11x multiplication function.
 		function automatic logic [7:0] xb
 			(input logic [7:0]  x);
-			 logic [7:0] x2, x4;
-			 assign x2 =   x[7] ? (x<<1) ^(8'h1b) : x<<1;
-			 assign x5 = (x2[7] ? (x2<<1)^(8'h1b) : x<<1)^x;
-			 return ((x5[7] ? (x5<<1)^(8'h1b) : x<<1)^x);			
-			 return (x[7] ? x<<1^8'h1b : x<<1)^x;
+			 logic [7:0] x2, x5;
+			 x2 =   x[7] ? (x<<1)^(8'h1b) : x<<1;
+			 x5 =    (x2[7] ? (x2<<1)^(8'h1b) : x2<<1)^x;
+			 return ((x5[7] ? (x5<<1)^(8'h1b) : x5<<1)^x);			//// Deleted another line here, may need to verify.
 		endfunction;
 
 		 //This function defines the false 13x multiplication function, 
 		function automatic logic [7:0] xd
 			 (input logic [7:0]  x);
 			 logic [7:0] x3, x6; 
-			 assign x3=  (x[7] ? (x<<1) ^(8'h1b) :  x<<1)^x;
-			 assign x6 = x3[7] ? (x3<<1)^(8'h1b) : x3<<1;		 
-			 return (x6[7] ? (x6<<1)^(8'h1b) : x6<<1)^x; 
+			 x3=  (x[7] ? (x<<1) ^(8'h1b) :  x<<1)^x;
+			 x6 = x3[7] ? (x3<<1)^(8'h1b) : x3<<1;		 
+			 return ((x6[7] ? (x6<<1)^(8'h1b) : x6<<1)^x); 
 		endfunction;
 
 		//This function defines the false 14x multiplication function.
@@ -193,9 +325,9 @@ const logic [255:0][7:0] INVSBOX = '{
 		function automatic logic [7:0] xe
 			(input logic [7:0]  x);
 			logic [7:0] x3, x9 ; 
-			assign x3 = ( x[7] ? x <<1^8'h1b : {x<<1} )^x;
-			assign x9 = (x3[7] ? x3<<1^8'h1b : {x3<<1})^x;			
-			return (x9[7] ? (x9<<1)^(8'h1b) : x<<1);
+			x3 = ( x[7] ? x <<1^8'h1b : {x<<1} )^x;
+			x9 = (x3[7] ? x3<<1^8'h1b : {x3<<1})^x;			
+			return (x9[7] ? (x9<<1)^(8'h1b) : x9<<1);
 		endfunction;
 
 
@@ -206,9 +338,16 @@ const logic [255:0][7:0] INVSBOX = '{
 		| b d 9 e |       | b12 b8  b4 b0 |				| c12 c8  c4 c0 |	
 		 */
 
-		logic [15:0][7:0] 	 mixcol_in, mixcol_out; 
+		logic [15:0][7:0] 	 mixcol_in, mixcol_out;
+logic [7:0]		test_b, test_d, test_9, test_e, test_tot; 
 		
-		assign mixcol_in = invsbox_out;
+		assign mixcol_in = invsbox_out^round_key; //This accomplishes the AddRoundKey step.  
+		
+		assign test_b = xb(mixcol_in[15]);
+		assign test_d = xd(mixcol_in[14]);
+		assign test_9 = x9(mixcol_in[13]);
+		assign test_e = xe(mixcol_in[12]);
+		assign test_tot = test_b^test_d^test_9^test_e;
 
 		assign mixcol_out[15]  =	xe(mixcol_in[15])  ^ xb(mixcol_in[14])  	^ xd(mixcol_in[13])  ^ x9(mixcol_in[12]);
 		assign mixcol_out[14]  =	x9(mixcol_in[15])  ^ xe(mixcol_in[14])  	^ xb(mixcol_in[13])  ^ xd(mixcol_in[12]);
@@ -231,12 +370,12 @@ const logic [255:0][7:0] INVSBOX = '{
 		assign mixcol_out[0]	 =	xb(mixcol_in[3])  ^ xd(mixcol_in[2])  	^ x9(mixcol_in[1])  ^ xe(mixcol_in[0]);
 
 	
-		assign round_out = ( fin_flag ? shiftrows_out : mixcol_out)^round_key; 
+		assign round_out = ( fin_flag ? mixcol_in : mixcol_out); 
 
 
 //need to define the last round,
 //sub bytes, shift rows, add round key.  In that order. 
 
-
+endmodule: aesdecrypt
 
 
