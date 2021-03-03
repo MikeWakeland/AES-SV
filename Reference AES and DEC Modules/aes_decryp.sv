@@ -1,27 +1,3 @@
-
-//This file is trash and should not be viewed by anyone.  
-/*
-Pseudocode per the AES technical standard.
-
-InvCipher(byte in[4*Nb], byte out[4*Nb], word w[Nb*(Nr+1)])
-begin
-byte state[4,Nb]
-state = in
-AddRoundKey(state, w[Nr*Nb, (Nr+1)*Nb-1]) // See Sec. 5.1.4
-
-for round = Nr-1 step -1 downto 1
-InvShiftRows(state) // See Sec. 5.3.1
-InvSubBytes(state) // See Sec. 5.3.2
-AddRoundKey(state, w[round*Nb, (round+1)*Nb-1])
-InvMixColumns(state) // See Sec. 5.3.3
-end for
-
-InvShiftRows(state)
-InvSubBytes(state)
-AddRoundKey(state, w[0, Nb-1])
-out
-
-*/
 		`include "aes_hdr.sv"
 		`include "aeslib.sv"
 		`define SIM  //tick commands are commands to the tools.  Tells the tools that it should go to these files and grab whats in there.  
@@ -136,11 +112,6 @@ out
 
 endmodule: tb_top
 
-
-
-
-
-
 		 module aesdecrypt (
 		 
 				input logic										eph1,
@@ -160,7 +131,6 @@ endmodule: tb_top
  		logic 				keyflag_128, keyflag_192, keyflag_256, start_flag; 
 		logic [127:0] round_recycle, round_in, round_out;
 		logic [127:0] round_key;
-
 
 const logic [255:0][7:0] INVSBOX = '{
  8'h7d, 8'h0c, 8'h21, 8'h55, 8'h63, 8'h14, 8'h69, 8'he1, 8'h26, 8'hd6, 8'h77, 8'hba, 8'h7e, 8'h04, 8'h2b, 8'h17,
@@ -189,63 +159,44 @@ const logic [255:0][7:0] INVSBOX = '{
 		//Register inputs for timing. 	
 		rregs #(1) 		rdyid 	(ready, ready_i, eph1);
 		rregs #(1) 		rdyregd (rdy_reg, reset ? '0 : ready, eph1); //rdy_reg exists to ensure that start_flag is only up for one c/c, which is the clock immediately after 
-																															//AES receives the positive edge of the ready flag input.  
+																															 //AES receives the positive edge of the ready flag input.  
 		rregs #(128)	ptid 	(plain_text, plain_text_i, eph1);		
 		rregs #(2)		ksid 	(key_size, key_size_i, eph1);					
 		rregs #(1920) kwid 	(key_words, key_words_i, eph1);
-
 
 		//Works with ready and rdy_reg to provide the start signal to AES
 		rregs #(1) kdkedd (start_flag , reset ? '0 : ready^rdy_reg, eph1); 
 		
 		rregs #(128)  rnrecd ( round_recycle , round_out , eph1);
-		assign round_in = start_flag ? cipher_i^key_words[div_clks] : round_recycle ; //selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
-		assign plain_out = fin_flag_d ? round_recycle : '0; 									 		//Captures the registered value of round out as the final output, avoiding another register.    		
-		rregs #(1) 		finfld  (fin_flag_d, reset ? '0 : fin_flag, eph1);				 		//delays fin_flag by one c/c to match timing with the proper aes output.  				
+		assign round_in = start_flag ? cipher_i^key_words[ctr_initial] : round_recycle ;//selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
+		assign plain_out = fin_flag_d ? round_recycle : '0; 									 					//Captures the registered value of round out as the final output, avoiding another register.    		
+		rregs #(1) 		finfld  (fin_flag_d, reset ? '0 : fin_flag, eph1);				 				//delays fin_flag by one c/c to match timing with the proper aes output.  				
 		
-
-		
-		//////////////////////////////////////////////////////////////////////////////////////	///////////////////////////////////////////////////////////////////////////
-		//This section times the fin_flag, the purpose of which is to tell the machine that it has reached the final round of AES.  The fin flag should rise
-		//after either 10, 12, or 14 rounds depending on the key length.  
+  
 		//Decides what size the key is based on the user's input. Have to initialize at zero due to registered user input.   
 		assign keyflag_256 =	reset ? '0 : key_size[1];								 	 //1X
 		assign keyflag_192 =  reset ? '0 : ~key_size[1] & key_size[0];	 //01
 		assign keyflag_128 =  reset ? '0 : ~|key_size;									 //00
-				
-/* 		rmuxd4 #(1) finrd 	 ( fin_flag,          //Raises the fin_flag when downcounter cycle_ctr reaches the appropriate value based on the key size.  
-					keyflag_256, ( cycle_ctr == 4'he ), //1
-					keyflag_192, ( cycle_ctr == 4'hc ), //3
-					keyflag_128, ( cycle_ctr == 4'ha ), //5
-					1'b0	
-		); */
-		
-		assign fin_flag = ( cycle_ctr == 4'hf ) ? 1'b1 : 1'b0; 
-		
-		 //Downcounter starts at 14d, counts down every clock.  I need to reverse the counter for decryption.
-		 
-		 
-		 logic [3:0] cycle_ctr_pr, div_clks, cycle_ctr;
+						
+		logic [3:0] cycle_ctr_pr, ctr_initial, cycle_ctr;
 
-
-		rmuxd4 #(4) ctrind ( div_clks,
+		//Sets up the original value for the round counter
+		rmuxdx3 #(4) ctrind ( ctr_initial,
 					keyflag_256, ( 4'h1 ), //e
 					keyflag_192, ( 4'h3 ),  //c
-					keyflag_128, ( 4'h5 ), //a
-					4'b0	
+					keyflag_128, ( 4'h5 ) //a	
 		 );
-		 //If this doesn't work I should simply rearrainge the keywords vector using a simple reconcatenation.  
+		//Raises the fin flag when the counter reaches 15.
+		//The initial value determines how many clocks it takes to raise the flag.  
+		assign fin_flag = ( cycle_ctr == 4'hf ); 
 
-		 assign  cycle_ctr = reset | start_flag ? div_clks + 1: (cycle_ctr_pr!='0 ? cycle_ctr_pr + 1'b1 : 4'h0);  //added +1 here, 
-		 rregs #(4) cycrd (cycle_ctr_pr, cycle_ctr, eph1);	
 				
+ 		assign  cycle_ctr = (reset | start_flag ? ctr_initial : (cycle_ctr_pr ))+1'b1;  
+		rregs #(4) cycrd (cycle_ctr_pr, cycle_ctr, eph1);			
+				 
 		assign round_key = key_words[cycle_ctr];		
-		
-		////////////////////////////////////End admin///
-	
-		
-		
-				///ShiftRows (completed)
+			
+		///ShiftRows 
 		//Indicies are in column-major format.
 		// example, key = {b15, b14, b13,..., b2, b1, b0}.  b0 = key[127:120] = key[15][7:0]
 		/*
@@ -266,115 +217,137 @@ const logic [255:0][7:0] INVSBOX = '{
 		assign shiftrows_out[12] = shiftrows_in[8] ;	assign shiftrows_out[8]  = shiftrows_in[4] ;	assign shiftrows_out[4] = shiftrows_in[0] ;		assign shiftrows_out[0] = shiftrows_in[12];
 
 
+		///InvSBOX 
+		// This section performs the inverse Rijndael SBOX lookup using the table in the technical specification.
+		// The byte entries used in the table lookup are reversed due to the way that SystemVerilog indexes variables,
+		// but the actual bits within each byte are still the same.  
 
-		logic [15:0][7:0] 	invsbox_in, invsbox_out;	
-		assign invsbox_in = shiftrows_out; //need to restructure into a [15:0][7:0] bit packed array rather than [127:0].
-
+		logic [15:0][7:0] 	invsbox_out;
+		
 		//This section performs the actual INVSBOX table lookup, which matches the contents of the input to the 8 bit address of the INVSBOX.
-		assign invsbox_out[15] = INVSBOX[invsbox_in[15]];
-		assign invsbox_out[14] = INVSBOX[invsbox_in[14]]; 
-		assign invsbox_out[13] = INVSBOX[invsbox_in[13]];
-		assign invsbox_out[12] = INVSBOX[invsbox_in[12]];
-		assign invsbox_out[11] = INVSBOX[invsbox_in[11]]; 
-		assign invsbox_out[10] = INVSBOX[invsbox_in[10]];
-		assign invsbox_out[9]  = INVSBOX[invsbox_in[9]] ;
-		assign invsbox_out[8]  = INVSBOX[invsbox_in[8]] ;
-		assign invsbox_out[7]  = INVSBOX[invsbox_in[7]] ;
-		assign invsbox_out[6]  = INVSBOX[invsbox_in[6]] ;
-		assign invsbox_out[5]  = INVSBOX[invsbox_in[5]] ;
-		assign invsbox_out[4]  = INVSBOX[invsbox_in[4]] ;
-		assign invsbox_out[3]  = INVSBOX[invsbox_in[3]] ;
-		assign invsbox_out[2]  = INVSBOX[invsbox_in[2]] ;
-		assign invsbox_out[1]  = INVSBOX[invsbox_in[1]] ;
-		assign invsbox_out[0]  = INVSBOX[invsbox_in[0]] ;
+		assign invsbox_out[15] = INVSBOX[shiftrows_out[15]];
+		assign invsbox_out[14] = INVSBOX[shiftrows_out[14]]; 
+		assign invsbox_out[13] = INVSBOX[shiftrows_out[13]];
+		assign invsbox_out[12] = INVSBOX[shiftrows_out[12]];
+		assign invsbox_out[11] = INVSBOX[shiftrows_out[11]]; 
+		assign invsbox_out[10] = INVSBOX[shiftrows_out[10]];
+		assign invsbox_out[9]  = INVSBOX[shiftrows_out[9]] ;
+		assign invsbox_out[8]  = INVSBOX[shiftrows_out[8]] ;
+		assign invsbox_out[7]  = INVSBOX[shiftrows_out[7]] ;
+		assign invsbox_out[6]  = INVSBOX[shiftrows_out[6]] ;
+		assign invsbox_out[5]  = INVSBOX[shiftrows_out[5]] ;
+		assign invsbox_out[4]  = INVSBOX[shiftrows_out[4]] ;
+		assign invsbox_out[3]  = INVSBOX[shiftrows_out[3]] ;
+		assign invsbox_out[2]  = INVSBOX[shiftrows_out[2]] ;
+		assign invsbox_out[1]  = INVSBOX[shiftrows_out[1]] ;
+		assign invsbox_out[0]  = INVSBOX[shiftrows_out[0]] ;
 		
 		
-
-		 //This function defines the false 9x multiplication function, 
-		//which is three 2x functions followed by an XOR with the original value.
-		function automatic logic [7:0] x9
-			 (input logic [7:0]  x);
-			 logic [7:0] x1, x2, x4, x8;
-			  x1 =  x;
-			  x2=  x1[7] ? (x1<<1)^(8'h1b) : x1<<1;
-			  x4 = x2[7] ? (x2<<1)^(8'h1b) : x2<<1;
-			  x8 = x4[7] ? (x4<<1)^(8'h1b) : x4<<1;
-				return (x8^x); 
-		endfunction;
-
-		//This function defines the false 11x multiplication function.
-		function automatic logic [7:0] xb
-			(input logic [7:0]  x);
-			 logic [7:0] x2, x5;
-			 x2 =   x[7] ? (x<<1)^(8'h1b) : x<<1;
-			 x5 =    (x2[7] ? (x2<<1)^(8'h1b) : x2<<1)^x;
-			 return ((x5[7] ? (x5<<1)^(8'h1b) : x5<<1)^x);			//// Deleted another line here, may need to verify.
-		endfunction;
-
-		 //This function defines the false 13x multiplication function, 
-		function automatic logic [7:0] xd
-			 (input logic [7:0]  x);
-			 logic [7:0] x3, x6; 
-			 x3=  (x[7] ? (x<<1) ^(8'h1b) :  x<<1)^x;
-			 x6 = x3[7] ? (x3<<1)^(8'h1b) : x3<<1;		 
-			 return ((x6[7] ? (x6<<1)^(8'h1b) : x6<<1)^x); 
-		endfunction;
-
-		//This function defines the false 14x multiplication function.
-		//It is the same as the 2x function but includes an XOR with the original value 
-		function automatic logic [7:0] xe
-			(input logic [7:0]  x);
-			logic [7:0] x3, x9 ; 
-			x3 = ( x[7] ? x <<1^8'h1b : {x<<1} )^x;
-			x9 = (x3[7] ? x3<<1^8'h1b : {x3<<1})^x;			
-			return (x9[7] ? (x9<<1)^(8'h1b) : x9<<1);
-		endfunction;
-
-
+		//AddRoundKey
+		//The most simple step merely XORs the Roundkey with the INVSBOX's output.
+  	logic [15:0][7:0] 	 addkey_out;
+		assign addkey_out = invsbox_out^round_key; //This accomplishes the AddRoundKey step.		
+		
+		
+		///InvMixColumns
+		// This section performs the inverse mix columns function, which is operationally equivalent to the 
+		// "forward" MixColumns in the encryption step.  However, the multiplication matrix is inverted 
+		//  per the technical standard.  This is the mathematical operation:
+				
 		/* 	Graphical representation of the Invmixcolumn operation.
 		| e b d 9 |       | b15 b11 b7 b3 |				| c15 c11 c7 c3 |
 		| 9 e b d |       | b14 b10 b6 b2 |				| c14 c10 c6 c2 |
 		| d 9 e b |   *   | b13 b9  b5 b1 |   = 	| c13 c9  c5 c1 |
 		| b d 9 e |       | b12 b8  b4 b0 |				| c12 c8  c4 c0 |	
 		 */
-
-		logic [15:0][7:0] 	 mixcol_in, mixcol_out;
-logic [7:0]		test_b, test_d, test_9, test_e, test_tot; 
+		 
 		
-		assign mixcol_in = invsbox_out^round_key; //This accomplishes the AddRoundKey step.  
+		 //Multiplicative functions.
+		 //All multiplicative functions in InvMixColumns (9,b,d,e) are described within 8-bit Galois Field per the standard.
+		 //The operational multiplication for all functions has been reduced through boolean logic in the "return" of each 
+		 //section and has been verified to be bitwise equivalent to the described operation in the standard.  
+		 //The two base multiplications are x2 and x3, which are described as:
+				 //
+		/* Symbolically...
+		x9=(((x×2)×2)×2)+x
+		x×b=((((x×2)×2)+x)×2)+x
+		x×d=((((x×2)+x)×2)×2)+x
+		x×e=((((x×2)+x)×2)+x)×2 
 		
-		assign test_b = xb(mixcol_in[15]);
-		assign test_d = xd(mixcol_in[14]);
-		assign test_9 = x9(mixcol_in[13]);
-		assign test_e = xe(mixcol_in[12]);
-		assign test_tot = test_b^test_d^test_9^test_e;
+		Behaviorally the base operations are...
+		function automatic logic [7:0] x2
+			 (input logic [7:0]  x);
+				return (x[7] ? (x<<1)^(8'h1b) : x<<1); 
+		endfunction;
 
-		assign mixcol_out[15]  =	xe(mixcol_in[15])  ^ xb(mixcol_in[14])  	^ xd(mixcol_in[13])  ^ x9(mixcol_in[12]);
-		assign mixcol_out[14]  =	x9(mixcol_in[15])  ^ xe(mixcol_in[14])  	^ xb(mixcol_in[13])  ^ xd(mixcol_in[12]);
-		assign mixcol_out[13]  =	xd(mixcol_in[15])  ^ x9(mixcol_in[14])  	^ xe(mixcol_in[13])  ^ xb(mixcol_in[12]);
-		assign mixcol_out[12]  =	xb(mixcol_in[15])  ^ xd(mixcol_in[14])  	^ x9(mixcol_in[13])  ^ xe(mixcol_in[12]);
+		function automatic logic [7:0] x3
+			(input logic [7:0]  x);
+			 return (x[7] ? x<<1^8'h1b : {x<<1})^x;
+		endfunction;*/
 
-		assign mixcol_out[11]  =  xe(mixcol_in[11])  ^ xb(mixcol_in[10])  	^ xd(mixcol_in[9])  ^ x9(mixcol_in[8]);
-		assign mixcol_out[10]  =  x9(mixcol_in[11])  ^ xe(mixcol_in[10])  	^ xb(mixcol_in[9])  ^ xd(mixcol_in[8]);
-		assign mixcol_out[9]   =  xd(mixcol_in[11])  ^ x9(mixcol_in[10])  	^ xe(mixcol_in[9])  ^ xb(mixcol_in[8]);
-		assign mixcol_out[8]   =  xb(mixcol_in[11])  ^ xd(mixcol_in[10])  	^ x9(mixcol_in[9])  ^ xe(mixcol_in[8]);
+			function automatic logic [7:0] x9
+			(input logic [7:0]  x);
+			logic n67, n50, n56;
+			n67 = x[6]^x[7];
+			n50 = x[5]^x[0];
+			n56 = x[5]^x[6];
+			return ({x[4]^x[7], x[3]^n67, x[2]^x[5]^n67 ,x[1]^x[4]^n56, x[3]^n50^x[7], x[2]^n67, x[1]^n56, n50});
+			endfunction;
 
-		assign mixcol_out[7]	 =	xe(mixcol_in[7])  ^ xb(mixcol_in[6])  	^ xd(mixcol_in[5])  ^ x9(mixcol_in[4]);
-		assign mixcol_out[6]   =	x9(mixcol_in[7])  ^ xe(mixcol_in[6])  	^ xb(mixcol_in[5])  ^ xd(mixcol_in[4]);
-		assign mixcol_out[5] 	 =	xd(mixcol_in[7])  ^ x9(mixcol_in[6])  	^ xe(mixcol_in[5])  ^ xb(mixcol_in[4]);
-		assign mixcol_out[4] 	 =	xb(mixcol_in[7])  ^ xd(mixcol_in[6])  	^ x9(mixcol_in[5])  ^ xe(mixcol_in[4]);
+			function automatic logic [7:0] xb
+			(input logic [7:0]  x);
+			logic n35, n67, n50;
+			n50 = x[5]^x[0];
+			n35 = x[3]^x[5];
+			n67 = x[6]^x[7];
+			return ({x[4]^n67, n35^n67, x[2]^x[4]^x[5]^n67, x[1]^x[4]^n35^n67, x[2]^x[3]^n50, x[1]^x[2]^n67, x[1]^n67^n50, n50^x[7]});
+			endfunction;
 
-		assign mixcol_out[3]	 =	xe(mixcol_in[3])  ^ xb(mixcol_in[2])  	^ xd(mixcol_in[1])  ^ x9(mixcol_in[0]);
-		assign mixcol_out[2]	 =	x9(mixcol_in[3])  ^ xe(mixcol_in[2])  	^ xb(mixcol_in[1])  ^ xd(mixcol_in[0]);
-		assign mixcol_out[1] 	 =	xd(mixcol_in[3])  ^ x9(mixcol_in[2])  	^ xe(mixcol_in[1])  ^ xb(mixcol_in[0]);
-		assign mixcol_out[0]	 =	xb(mixcol_in[3])  ^ xd(mixcol_in[2])  	^ x9(mixcol_in[1])  ^ xe(mixcol_in[0]);
+			function automatic logic [7:0] xd
+			(input logic [7:0]  x);
+			logic n17, n35, n60, n47;
+			n60 = x[6]^x[0];
+			n17 = x[1]^x[7];
+			n35 = x[3]^x[5];
+			n47 = x[4]^x[7];	
+			return ({n47^x[5], x[3]^n47^x[6], x[2]^n35^x[6], n17^x[2]^x[4]^x[5], n17^n35^n60, x[2]^n60, n17^x[5], x[5]^n60}); 
+			endfunction;
+			
+			function automatic logic [7:0] xe
+			(input logic [7:0]  x);
+			logic n35, n26, n56, n50;
+			n35 = x[3]^x[5];
+			n26 = x[2]^x[6];
+			n56 = x[5]^x[6];
+			n50 = x[5]^x[0];
+			return({x[4]^n56, n35^x[4]^x[7], n26^x[3]^x[4], x[1]^x[2]^n35, x[1]^n26^n50, x[1]^x[6]^x[0], n50, n56^x[7]});
+			endfunction;
+	 		
+  	logic [15:0][7:0] 	  mixcol_out;
+		
+		assign addkey_out = invsbox_out^round_key; //This accomplishes the AddRoundKey step.
+		assign mixcol_out[15]  =	xe(addkey_out[15])  ^ xb(addkey_out[14])  	^ xd(addkey_out[13])  ^ x9(addkey_out[12]);
+		assign mixcol_out[14]  =	x9(addkey_out[15])  ^ xe(addkey_out[14])  	^ xb(addkey_out[13])  ^ xd(addkey_out[12]);
+		assign mixcol_out[13]  =	xd(addkey_out[15])  ^ x9(addkey_out[14])  	^ xe(addkey_out[13])  ^ xb(addkey_out[12]);
+		assign mixcol_out[12]  =	xb(addkey_out[15])  ^ xd(addkey_out[14])  	^ x9(addkey_out[13])  ^ xe(addkey_out[12]);
 
-	
-		assign round_out = ( fin_flag ? mixcol_in : mixcol_out); 
+		assign mixcol_out[11]  =  xe(addkey_out[11])  ^ xb(addkey_out[10])  	^ xd(addkey_out[9])  ^ x9(addkey_out[8]);
+		assign mixcol_out[10]  =  x9(addkey_out[11])  ^ xe(addkey_out[10])  	^ xb(addkey_out[9])  ^ xd(addkey_out[8]);
+		assign mixcol_out[9]   =  xd(addkey_out[11])  ^ x9(addkey_out[10])  	^ xe(addkey_out[9])  ^ xb(addkey_out[8]);
+		assign mixcol_out[8]   =  xb(addkey_out[11])  ^ xd(addkey_out[10])  	^ x9(addkey_out[9])  ^ xe(addkey_out[8]);
 
+		assign mixcol_out[7]	 =	xe(addkey_out[7])  ^ xb(addkey_out[6])  	^ xd(addkey_out[5])  ^ x9(addkey_out[4]);
+		assign mixcol_out[6]   =	x9(addkey_out[7])  ^ xe(addkey_out[6])  	^ xb(addkey_out[5])  ^ xd(addkey_out[4]);
+		assign mixcol_out[5] 	 =	xd(addkey_out[7])  ^ x9(addkey_out[6])  	^ xe(addkey_out[5])  ^ xb(addkey_out[4]);
+		assign mixcol_out[4] 	 =	xb(addkey_out[7])  ^ xd(addkey_out[6])  	^ x9(addkey_out[5])  ^ xe(addkey_out[4]);
 
-//need to define the last round,
-//sub bytes, shift rows, add round key.  In that order. 
+		assign mixcol_out[3]	 =	xe(addkey_out[3])  ^ xb(addkey_out[2])  	^ xd(addkey_out[1])  ^ x9(addkey_out[0]);
+		assign mixcol_out[2]	 =	x9(addkey_out[3])  ^ xe(addkey_out[2])  	^ xb(addkey_out[1])  ^ xd(addkey_out[0]);
+		assign mixcol_out[1] 	 =	xd(addkey_out[3])  ^ x9(addkey_out[2])  	^ xe(addkey_out[1])  ^ xb(addkey_out[0]);
+		assign mixcol_out[0]	 =	xb(addkey_out[3])  ^ xd(addkey_out[2])  	^ x9(addkey_out[1])  ^ xe(addkey_out[0]);
+
+	 //The final round does not perform InvMixColumns, so round_out selects addkey_out for the final round.  
+		assign round_out = ( fin_flag ? addkey_out : mixcol_out); 
 
 endmodule: aesdecrypt
 

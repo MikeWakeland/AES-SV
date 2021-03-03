@@ -162,7 +162,7 @@ endmodule: tb_top
 	
 	
 				//Register inputs for timing purposes.  start, reset, and eph1 not registered.  
-		 logic										ready, rdy_reg;
+		 logic										ready, rdy_reg, out_rdy;
 		 logic  [127:0]						plain_text;
 		 logic  [1:0]							key_size; 
 		 logic  [15:1][127:0] 		key_words;
@@ -181,8 +181,12 @@ endmodule: tb_top
 		
 		rregs #(128)  rnrec ( round_recycle , round_out , eph1);
 		assign round_in = start_flag ? plain_text^key_words[15] : round_recycle ; //selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
-		assign aes_out_r = fin_flag_r ? round_recycle : '0; 									 		//Captures the registered value of round out as the final output, avoiding another register.    		
-		rregs #(1) 		finfl  (fin_flag_r, reset ? '0 : fin_flag, eph1);				 		//delays fin_flag by one c/c to match timing with the proper aes output.  				
+		assign aes_out_r = out_rdy ? round_recycle : '0; 									 		//Captures the registered value of round out as the final output, avoiding another register.    		
+		rregs #(1) 		outr  (out_rdy, reset ? '0 : fin_flag & ~fin_flag_r, eph1); //Ensures outr is only up for one cc
+		rregs #(1) 		finfl  (fin_flag_r, reset ? '0 : fin_flag | fin_flag_r, eph1);//delays fin_flag by one c/c to match timing with the proper aes output.  
+																																								//Also latches "up" fin_flag_r so it becomes permanently up when AES is done
+		
+		
 		
 		//////////////////////////////////////////////////////////////////////////////////////	///////////////////////////////////////////////////////////////////////////
 		//This section times the fin_flag, the purpose of which is to tell the machine that it has reached the final round of AES.  The fin flag should rise
