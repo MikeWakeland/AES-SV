@@ -1,5 +1,6 @@
 		`include "aes_hdr.sv"
 		`include "aeslib.sv"
+		`include "muxreglib.sv"
 		`define SIM  //tick commands are commands to the tools.  Tells the tools that it should go to these files and grab whats in there.  
 
 		//----------------------------------------------
@@ -88,9 +89,10 @@
 				128'h5EA8D5D6E62BD10090FAE27ED447B247,
 				128'hCF15581DEC95434E87C7DCF2641A67DB};
 
-			logic ready;
+			logic ready, res_latch;
+			
 
-			assign ready = ~reset & res_latch ; //Ready will eventually have to be changed to be the out_ flag from the aes encrytpion round, but for now this is fine. 
+			assign ready = ~reset | res_latch ; //Ready will eventually have to be changed to be the out_ flag from the aes encrytpion round, but for now this is fine. 
 				rregs #(1) sdjksuiofiue (res_latch, reset ? 1'b0 :ready, eph1);
 /////////////////////////////////////////////////////End fake input section///////////////////////////////////////////////////////		
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -130,6 +132,8 @@
  
 		
 		
-
+	
+ 
+ 
 
 		
