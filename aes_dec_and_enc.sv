@@ -101,32 +101,31 @@
 		aes aesist (  										//This module instantiates all of AES, which takes only fake inputs and spits out only real results.   
 				.eph1         					(eph1),
 				.reset        					(reset),
-				.start 									(start),
 
-				.ready_i 								(ready),
-				.plain_text_i						(plain_text),
-				.key_size_i							(key_size),  
-				.key_words_i   					(key_words),
+				.ready 									(ready),
+				.plain_text							(plain_text),
+				.key_size								(key_size),  
+				.key_words   						(key_words),
 
 				.fin_flag_r							(fin_flag_r),
 				.aes_out_r  						(aes_out_r)   
 		); 
 
+
+
 	
 	aesdecrypt aesdec (  										//This module instantiates all of AES, which takes only fake inputs and spits out only real results.   
 				.eph1         					(eph1),
 				.reset        					(reset),
-				.start 									(start),
 
-				.ready_i 								(fin_flag_r),
-				.cipher_i								(aes_out_r),
-				.key_size_i							(key_size),  
-				.key_words_i   					(key_words),
+				.ready 									(fin_flag_r),
+				.cipher				  				(aes_out_r),
+				.key_size		 						(key_size),  
+				.key_words    					(key_words),
 
-				.fin_flag_d							(fin_flag_d),
+				.fin_flag_r							(fin_flag_d),
 				.plain_out  						(plain_out)   
 		); 
-		
 		
 		endmodule: tb_top
  
