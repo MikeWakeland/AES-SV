@@ -7,22 +7,9 @@ AES decryption
 
 
 	 module aesencrypt (
-
-			/* 
-			AES Encrypt expects exactly all of the following:
-			> An asserted continuous or pulse ready signal.  The signal must be asserted at all times.
-			> A valid Key Words vector, arranged such that the most first generated word in the vector carries the largest index.
-			> A Key Size vector, which is a 2' code depending on the length of the true key.  (2'b00 = 128' key, 2'b01 = 196' key, 2'b1X = 256' key)
-			> a plain text input, which must be asserted on the same clock cycle as the positive edge of the ready signal.
-			> If the "ready" flag is brought from LOW to HIGH during an active encryption cycle, the existing encryption will be trashed
-				and a new encryption will start with the existing plain_text input.  
-			
-				 
-			AES Encrypt produces the following:
-			> a pulse signal that indicates AES Encrypt has finished and the cipher text is valid for this clock only.
-			> 128' of cipher text.
-			*/
-			
+		 //ready must ALWAYS be asserted (0 or 1) to aes or the module will not work.  
+		 //The module will read the plain_text input at the same posedge that ready becomes high.  	
+		 //As written, ready takes a flatline high input, not a pulse.  
 				input logic										eph1,
 				input logic										reset,
 
@@ -33,8 +20,6 @@ AES decryption
 				
 				output logic									fin_flag_r,
 				output logic [127:0] 					aes_out_r
-				
-				
 		 
 		 );
 		 
@@ -72,49 +57,54 @@ AES decryption
 			8'h76, 8'hab, 8'hd7, 8'hfe, 8'h2b, 8'h67, 8'h01, 8'h30, 8'hc5, 8'h6f, 8'h6b, 8'hf2, 8'h7b, 8'h77, 8'h7c, 8'h63 }; 	
 	
 	
-		///////////////////////This section performs the control logic for AES encryption.////////////////////////////////////////////////////////
-		 logic										ready_r, rdy_reg, out_rdy, ff_latch;
+				//Register inputs for timing purposes.  start, reset, and eph1 not registered.  
+		 logic										ready_r, rdy_reg, out_rdy;
 		 logic  [127:0]						plain_text_r;
-		 logic 	[3:0] cycle_ctr_pr, div_clks, cycle_ctr;
+		 logic [3:0] cycle_ctr_pr, div_clks, cycle_ctr;
+		 
+		// logic  [15:1][127:0] 		key_words;
 			
 		//Register inputs for timing. 	
-		rregs #(1) 		rdyi 	(ready_r, ~reset & ready, eph1);  										//registers the input signal.
-		rregs #(1) 		rdyreg (rdy_reg, ~reset & ready_r, eph1);										//rdy_reg enables the support of continuous as well as a pulse ready signal.  
-																												
-		rregs #(128)	pti 	(plain_text_r, (ready & ~ready_r) ? plain_text : plain_text_r, eph1);	//start flag is one c/c too early so use "ready" instead for this mux reg.  
+		rregs #(1) 		rdyi 	(ready_r, ~reset & ready, eph1);  //registers the input signal.
+		rregs #(1) 		rdyreg (rdy_reg, ~reset & ready_r, eph1); //rdy_reg exists to ensure that start_flag is only up for one c/c, which is the clock immediately after 
+																															//AES receives the positive edge of the ready_r flag input.  
+		rregs #(128)	pti 	(plain_text_r, plain_text, eph1);		
 	
-		assign start_flag = ~reset & ready_r & ~rdy_reg;														//The start command for the Encryption run.  
-	
-		rregs #(128)  rnrec ( round_recycle , round_out , eph1);										//Registers the previous round out for input to the next round, and output timing purposes
+
+		assign start_flag = ~reset & ready_r & ~rdy_reg;
+
+		rregs #(128)  rnrec ( round_recycle , round_out , eph1);
 		assign round_in = start_flag ? plain_text_r^key_words[15] : round_recycle ; //selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
-		assign aes_out_r = round_recycle; 									 												//Captures the registered value of round out as the final output, avoiding another register.    		
+		assign aes_out_r = out_rdy & round_recycle; 									 		//Captures the registered value of round out as the final output, avoiding another register.    		
+		rregs #(1) 		outr  (out_rdy, ~reset & fin_flag & ~fin_flag_r, eph1); //Ensures outr is only up for one cc
+		rregs #(1) 		finfl  (fin_flag_r, ~reset & (fin_flag | fin_flag_r) , eph1); //delays fin_flag by one c/c to match timing with the proper aes output.  
+																																								//Also latches "up" fin_flag_r so it becomes permanently up when AES is done
 		
 		
-		rregs #(1) 		finfl  (fin_flag_r, ~reset & (fin_flag &~ff_latch) , eph1);		//delays fin_flag by one c/c to match timing with the proper aes output.  										
-		rregs #(1) fflltch 	 (ff_latch, ~reset&(fin_flag_r | ff_latch),eph1);      	//Ensures single pulse output.
 		
-		
+		//////////////////////////////////////////////////////////////////////////////////////	///////////////////////////////////////////////////////////////////////////
 		//This section times the fin_flag, the purpose of which is to tell the machine that it has reached the final round of AES.  The fin flag should rise
 		//after either 10, 12, or 14 rounds depending on the key length.  
 		//Decides what size the key is based on the user's input. Have to initialize at zero due to registered user input.   
-		assign keyflag_256 =	~reset & key_size[1];								 	 //1X
-		assign keyflag_192 =  ~reset & ~key_size[1] & key_size[0];	 //01
-		assign keyflag_128 =  ~reset & ~|key_size;									 //00
+		assign keyflag_256 =	reset ? '0 : key_size[1];								 	 //1X
+		assign keyflag_192 =  reset ? '0 : ~key_size[1] & key_size[0];	 //01
+		assign keyflag_128 =  reset ? '0 : ~|key_size;									 //00
 				
-		rmuxdx3 #(1) finr 	 ( fin_flag,          //Raises the fin_flag when downcounter cycle_ctr reaches the appropriate value based on the key size.  
+		rmuxd4 #(1) finr 	 ( fin_flag,          //Raises the fin_flag when downcounter cycle_ctr reaches the appropriate value based on the key size.  
 					keyflag_256, ( cycle_ctr == 4'b1 ),
 					keyflag_192, ( cycle_ctr == 4'h3 ),
-					keyflag_128, ( cycle_ctr == 4'h5 ) 	
+					keyflag_128, ( cycle_ctr == 4'h5 ), 
+					1'b0	
 		);
 		
 		 //Downcounter starts at 14d, counts down every clock.  The value is used to index key_words[] to pull the key from keyexpansion.sv
 		 assign div_clks = 4'he;
-		 assign  cycle_ctr = reset | start_flag ? div_clks : (cycle_ctr_pr!='0 ? cycle_ctr_pr - 1'b1 : 3'hf);
+		 assign  cycle_ctr = reset | start_flag ? div_clks : (cycle_ctr_pr!='0 ? cycle_ctr_pr - 1'b1 : 3'hf); 
 		 rregs #(4) cycr (cycle_ctr_pr, cycle_ctr, eph1);	
 				
 		assign round_key = key_words[cycle_ctr];		
 		
-		/////////////////////////////////////////////////////////AES Datapath///////////////////////////////////////////////////////////////////////////////////////
+		/////////////////////////////////////////////////////////AES Round///////////////////////////////////////////////////////////////////////////////////////
 		//////////////This section defines every successive "round" of AES, where the "inputs" are the round key and previous round's text (or plaintext).///////
 	
 		logic [15:0][7:0] 	sbox_in, sbox_out;	
@@ -219,30 +209,20 @@ AES decryption
 
 
 		 module aesdecrypt (
-			/* 
-			AES Decrypt expects exactly all of the following:
-			> An asserted continuous or pulse ready signal.  The signal must be asserted at all times.
-			> A valid Key Words vector, arranged such that the most first generated word in the vector carries the largest index.
-			> A Key Size vector, which is a 2' code depending on the length of the true key.  (2'b00 = 128' key, 2'b01 = 196' key, 2'b1X = 256' key)
-			> a cipher text input, which must be asserted on the same clock cycle as the positive edge of the ready signal.
-			> If the "ready" flag is brought from LOW to HIGH during an active encryption cycle, the existing encryption will be trashed
-				and a new encryption will start with the existing plain_text input.  
-			
-			AES Decrypt produces the following:
-			> a pulse signal that indicates AES Decrypt has finished and the cipher text is valid for this clock only.
-			> 128' of cipher text.
-			*/ 		 
-			
+		 
+		 //ready must ALWAYS be asserted (0 or 1) to aes or the module will not work.  
+		 //The module will read the cipher input at the same posedge that ready becomes high.  	
+		 //As written, ready takes a flatline high input, not a pulse.  		 
 				input logic										eph1,
 				input logic										reset,
 			
-				input logic										ready, 				//ready_r to start decryption.
-				input logic  [127:0]					cipher, 			//The cypher text to be decrypted.
-				input logic  [1:0]						key_size,			//The user defined key size, comes from keyexpansion.sv 
-				input logic  [15:1][127:0] 		key_words, 		//The pre expanded keys which come from keyexpansion.sv.
+				input logic										ready, //ready_r to start decryption.
+				input logic  [127:0]					cipher, //The cypher text to be decrypted.
+				input logic  [1:0]						key_size, //The user defined key size, comes from keyexpansion.sv 
+				input logic  [15:1][127:0] 		key_words, //The pre expanded keys which come from keyexpansion.sv.
 				
-				output logic									fin_flag_r, 	//	output logic									fin_flag_r,
-				output logic [127:0] 					plain_out			//	output logic [127:0] 					aes_out_r
+				output logic									fin_flag_r, //	output logic									fin_flag_r,
+				output logic [127:0] 					plain_out		//	output logic [127:0] 					aes_out_r
 		 
 		 );
 
@@ -268,35 +248,46 @@ const logic [255:0][7:0] INVSBOX = '{
  8'hcb, 8'he9, 8'hde, 8'hc4, 8'h44, 8'h43, 8'h8e, 8'h34, 8'h87, 8'hff, 8'h2f, 8'h9b, 8'h82, 8'h39, 8'he3, 8'h7c,
  8'hfb, 8'hd7, 8'hf3, 8'h81, 8'h9e, 8'ha3, 8'h40, 8'hbf, 8'h38, 8'ha5, 8'h36, 8'h30, 8'hd5, 8'h6a, 8'h09, 8'h52};
 
-		///////////////////////This section performs the control logic for AES encryption.////////////////////////////////////////////////////////
 			//Register inputs for timing purposes.  start, reset, and eph1 not registered.  
-		 logic										ready_r, rdy_reg, fin_latch, start_ctr;
+		 logic										ready_r, rdy_reg;
 		 logic  [127:0]						cipher_r, fin_flag_wide;
 		 logic  [3:0]							cycle_ctr_pr, ctr_initial, cycle_ctr;
 
 		//Register inputs for timing. 	
 		rregs #(1) 		rdyid 	(ready_r, ~reset&ready, eph1);
-		rregs #(1) 		rdyregd (rdy_reg, ~reset&ready_r, eph1);		 //rdy_reg enables the support of continuous as well as a pulse ready signal.
+		rregs #(1) 		rdyregd (rdy_reg, ~reset&ready_r, eph1); //rdy_reg exists to ensure that start_flag is only up for one c/c, which is the clock immediately after 
 																															 //AES receives the positive edge of the ready_r flag input.  
 
-		rregs #(128)	ptid 	(cipher_r, (ready & ~ready_r) ? cipher : cipher_r, eph1);						
+		
+		rregs #(128)	ptid 	(cipher_r, cipher, eph1);						
 
 		//Works with ready_r and rdy_reg to provide the start signal to AES
 		assign start_flag = ~reset & ready_r & ~rdy_reg; 
 		
 		rregs #(128)  rnrecd ( round_recycle , round_out , eph1);
-		assign round_in = start_flag ? cipher_r^key_words[ctr_initial] : round_recycle;						//selects the plaintext XOR key or previous round's output as the input to the next round.  	
-		assign fin_flag_wide = {128{fin_flag_r}};    																							//Extends fin_flag_r to use AND gates to avoid using a 32' mux. 
-		assign plain_out = fin_flag_wide&round_recycle; 									 												//Captures the registered value of round out as the final output, avoiding another register.    		
-	
-		rregs #(1) dkfkdjfd (fin_latch, ~(reset | start_flag) &(fin_flag_r | fin_latch ) , eph1);	//Prevents fin_flag from going up more than once per reset or start_flag (decrypt start).  
-		rregs #(1) 		finfld  (fin_flag_r, ~reset& (cycle_ctr == 4'hf) & ~fin_latch  , eph1);			//delays fin_flag by one c/c to match timing with the proper aes output.  				
+		assign round_in = start_flag ? cipher_r^key_words[ctr_initial] : round_recycle ;//selects the plaintext XOR key or previous round's output as the input to the next round.  	
+		assign fin_flag_wide = {128{fin_flag_r}};    																//Extends fin_flag_r to use AND gates to avoid using a 32' mux. 
+		assign plain_out = fin_flag_wide&round_recycle; 									 					//Captures the registered value of round out as the final output, avoiding another register.    		
+		rregs #(1) 		finfld  (fin_flag_r, ~reset&(cycle_ctr == 4'hf), eph1);				 				//delays fin_flag by one c/c to match timing with the proper aes output.  				
+		
+		
+		/* logic in, pulse, in_r;
+
+rregs xxx (in_r, ~reset & in, eph1);
+assign pulse = in & ~in_r;
+ */
+/* logic pulse;
+assign pulse = ready_r & ~rdy_reg;
+ */
+		
   
 		//Decides what size the key is based on the user's input. Have to initialize at zero due to registered user input.   
-		assign keyflag_256 =	 key_size[1];								 		//1X
-		assign keyflag_192 =  ~key_size[1] & key_size[0];	 		//01
-		assign keyflag_128 =  ~|key_size;									  	//00
+		assign keyflag_256 =	 key_size[1];								 	 //1X
+		assign keyflag_192 =  ~key_size[1] & key_size[0];	 //01
+		assign keyflag_128 =  ~|key_size;									   //00
 						
+
+
 		//Sets up the original value for the round counter
 		rmuxdx3 #(4) ctrind ( ctr_initial,
 					keyflag_256, ( 4'h1 ), //e
@@ -304,13 +295,19 @@ const logic [255:0][7:0] INVSBOX = '{
 					keyflag_128, ( 4'h5 )  //a	
 		 );
 				
-		//Counter stays at initialized value until start_ctr rises.  
-		//After this increment by 1 every c/c.  
-		rregs #(1) flgr ( start_ctr , ~reset &(start_ctr |start_flag), eph1); 
-		assign  cycle_ctr = (( start_ctr & ~reset) ? cycle_ctr_pr : ctr_initial)+1'b1;  
-		rregs #(4) cycrd (cycle_ctr_pr, cycle_ctr, eph1);	
+/*  		assign  cycle_ctr = ( start_flag ? ctr_initial : (cycle_ctr_pr ))+1'b1;  
+		rregs #(4) cycrd (cycle_ctr_pr, cycle_ctr, eph1);			 */
 		
-		assign round_key = key_words[cycle_ctr];	//Pulls the round key from the input vector.  	
+		
+ logic start_f_r;
+  rregs #(1) flgr ( start_f_r , ~reset &(start_f_r |start_flag), eph1); 
+	assign  cycle_ctr = ( (start_flag | start_f_r) ? (cycle_ctr_pr ) : ctr_initial)+1'b1;  
+		rregs #(4) cycrd (cycle_ctr_pr, cycle_ctr, eph1);			
+		
+		
+		
+				 
+		assign round_key = key_words[cycle_ctr];		
 			
 		///ShiftRows 
 		//Indicies are in column-major format.

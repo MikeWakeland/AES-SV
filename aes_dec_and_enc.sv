@@ -89,16 +89,20 @@
 				128'h5EA8D5D6E62BD10090FAE27ED447B247,
 				128'hCF15581DEC95434E87C7DCF2641A67DB};
 
-			logic ready, res_latch;
+			logic ready, res_latch, pulse_r;
 			
 
-			assign ready = ~reset | res_latch ; //Ready will eventually have to be changed to be the out_ flag from the aes encrytpion round, but for now this is fine. 
-				rregs #(1) sdjksuiofiue (res_latch, reset ? 1'b0 :ready, eph1);
+			assign ready = (~reset & ~res_latch) ; 
+				rregs #(1) sdjksuiofiue (res_latch, reset ? 1'b0 :ready | res_latch, eph1);
+
+			logic [127:0] plain_out;
+			logic 		fin_flag_d;
+				
 /////////////////////////////////////////////////////End fake input section///////////////////////////////////////////////////////		
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-		aes aesist (  										//This module instantiates all of AES, which takes only fake inputs and spits out only real results.   
+		aesencrypt aesist (  										//This module instantiates all of AES, which takes only fake inputs and spits out only real results.   
 				.eph1         					(eph1),
 				.reset        					(reset),
 
