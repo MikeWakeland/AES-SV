@@ -1,4 +1,3 @@
-		`include "aes_hdr.sv"
 		`include "aeslib.sv"
 		`include "muxreglib.sv"
 		`define SIM  //tick commands are commands to the tools.  Tells the tools that it should go to these files and grab whats in there.  
@@ -73,16 +72,16 @@
 			*/
 			//The key words are arrainged such the first key_word (128'h00010...) is index [15].
 		assign key_words = '{
-				128'hF01F2E724AC0AB35BE3A20FF7A7D7FCA,
-				128'hD005A3321BBF085C2BC611AE8820839D,
-				128'h46F370B60C33DB83B209FB7CC87484B6,
-				128'h3897FC7C2328F42008EEE58E80CE6613,
-				128'hCFC00D7BC3F3D6F871FA2D84B98EA932,
-				128'h6E8E2F5F4DA6DB7F45483EF1C58658E2,
+				128'hF01F2E724AC0AB35BE3A20FF7A7D7FCA, //1
+				128'hD005A3321BBF085C2BC611AE8820839D, //2
+				128'h46F370B60C33DB83B209FB7CC87484B6, //3
+				128'h3897FC7C2328F42008EEE58E80CE6613, //4
+				128'hCFC00D7BC3F3D6F871FA2D84B98EA932, //5
+				128'h6E8E2F5F4DA6DB7F45483EF1C58658E2, //6
 				128'h8FAA95DD4C5943253DA36EA1842DC793,
 				128'h3156E9837CF032FC39B80C0DFC3E54EF,
 				128'h358A4A6D79D30948447067E9C05DA07A,
-				128'h8B1A0959F7EA3BA5CE5237A8326C6347,   
+				128'h8B1A0959F7EA3BA5CE5237A8326C6347,   //10
 				128'h7571EA4E0CA2E30648D284EF888F2495,
 				128'h4F693F73B88304D676D1337E44BD5039,
 				128'h2F22F85523801B536B529FBCE3DDBB29,
@@ -95,14 +94,35 @@
 			assign ready = (~reset & ~res_latch) ; 
 				rregs #(1) sdjksuiofiue (res_latch, reset ? 1'b0 :ready | res_latch, eph1);
 
-			logic [127:0] plain_out;
-			logic 		fin_flag_d;
+			logic [127:0] aes_decrypted;
+			logic 		aes_decrypt_done;
 				
 /////////////////////////////////////////////////////End fake input section///////////////////////////////////////////////////////		
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-		aesencrypt aesist (  										//This module instantiates all of AES, which takes only fake inputs and spits out only real results.   
+
+	 aes_build	aes_build (
+	 
+				.eph1				(eph1),
+				.reset      (reset),
+
+				.ready      (ready),
+				.plain_text (plain_text),
+				.key_size   (key_size), 
+				.key_words  (key_words),
+				
+				.aes_decrypt_done (aes_decrypt_done),
+				.aes_decrypted	(aes_encrypt_done)
+		 );
+		
+		endmodule: tb_top
+ 
+		
+		
+	
+ /* 
+ 		aesencrypt aesist (  										//This module instantiates all of AES, which takes only fake inputs and spits out only real results.   
 				.eph1         					(eph1),
 				.reset        					(reset),
 
@@ -129,14 +149,7 @@
 
 				.fin_flag_r							(fin_flag_d),
 				.plain_out  						(plain_out)   
-		); 
+		);  */ 
 		
-		endmodule: tb_top
- 
-		
-		
-	
- 
- 
 
 		

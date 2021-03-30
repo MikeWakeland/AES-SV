@@ -1,3 +1,5 @@
+		`include "aes_hdr.sv"
+		`include "muxreglib.sv"
 //==========================================================================
 
 
@@ -8,18 +10,17 @@
 				input logic										ready,
 				input logic  [127:0]					plain_text,
 				input logic  [1:0]						key_size, 
-				input logic  [(15*128)-1:0] 	key_words, //legacy input logic [15:1][127:0]     key_words,
+				input logic  [1791:0] 				key_words, //legacy input logic [15:1][127:0]     key_words,
 				
-				output logic [255:0][7:0]			SBOX,
 				output logic									aes_decrypt_done,
 				output logic [127:0] 					aes_decrypted
 );		
 
 	 logic [127:0] 	aes_encrypted;
-	 logic          aes_encrypt_done, wr_key_words;
+	 logic          aes_encrypt_done;
    logic [(15*128)-1:0]     key_words_r;
 
-   rregs_en #((15*128),1) keywdsr (key_words_r, key_words, eph1, wr_key_words); //what's the point of this line?  
+   rregs_en #((15*128),1) keywdsr (key_words_r, key_words, eph1, wr_key_words);
 
 	 
 	 aes_encrypt	aes_encrypt (
@@ -29,12 +30,12 @@
 				.ready      (ready),
 				.plain_text (plain_text),
 				.key_size   (key_size), 
-				.key_words  (key_words_r),
+				.key_words  (key_words),
 				
-				.SBOX 			(SBOX),
 				.fin_flag_r (aes_encrypt_done),
 				.aes_out_r	(aes_encrypted)
 		 );
+
 
 	 aes_decrypt	aes_decrypt (
 				.eph1				(eph1),
@@ -43,7 +44,7 @@
 				.ready      (aes_encrypt_done),
 				.cipher     (aes_encrypted),
 				.key_size   (key_size), 
-				.key_words  (key_words_r),
+				.key_words  (key_words),
 				
 				.fin_flag_r (aes_decrypt_done),
 				.plain_out	(aes_decrypted)
@@ -76,7 +77,6 @@ module aes_encrypt (
 				input logic  [1:0]						key_size, 
 				input logic  [15:1][127:0] 		key_words,
 				
-				output logic [255:0][7:0]			SBOX, 
 				output logic									fin_flag_r,
 				output logic [127:0] 					aes_out_r
 		 );
@@ -124,7 +124,9 @@ module aes_encrypt (
 		rregs #(1) 		rdyi 	(ready_r, ~reset & ready, eph1);  										//registers the input signal.
 		rregs #(1) 		rdyreg (rdy_reg, ~reset & ready_r, eph1);										//rdy_reg enables the support of continuous as well as a pulse ready signal.  
 																												
-		rregs #(128)	pti 	(plain_text_r, (ready & ~ready_r) ? plain_text : plain_text_r, eph1);	//start flag is one c/c too early so use "ready" instead for this mux reg.  
+		// rregs_en #((15*128),1) keywdsr (key_words_r, key_words, eph1, wr_key_words);
+		
+		rregs_en #(128,1)	pti 	(plain_text_r, plain_text, eph1, (ready & ~ready_r));	//start flag is one c/c too early so use "ready" instead for this mux reg.  
 	
 		assign start_flag = ~reset & ready_r & ~rdy_reg;														//The start command for the Encryption run.  
 	

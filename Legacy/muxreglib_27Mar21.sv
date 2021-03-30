@@ -355,7 +355,121 @@ endmodule:rmuxd3_im
       endcase
       end
     endmodule:rmuxd7_im		
+	
+    //-----------------------------------	
+	
+    module rmuxd32_im #(parameter width=1) (
+      output logic [width-1:0] out,
+      input  logic             sel0, 
+      input  logic [width-1:0] in0,
+      input  logic             sel1, 
+      input  logic [width-1:0] in1, 
+      input  logic             sel2, 
+      input  logic [width-1:0] in2,
+	  input  logic 			   sel3,
+      input  logic [width-1:0] in3,
+      input  logic             sel4, 
+      input  logic [width-1:0] in4, 
+      input  logic             sel5, 
+      input  logic [width-1:0] in5,  
+	  input  logic			   sel6, 
+	  input  logic [width-1:0] in6,
+	  input  logic             sel7, 
+      input  logic [width-1:0] in7,
+      input  logic             sel8, 
+      input  logic [width-1:0] in8, 
+      input  logic             sel9, 
+      input  logic [width-1:0] in9,
+	  input  logic 			   sela,
+      input  logic [width-1:0] ina,
+      input  logic             selb, 
+      input  logic [width-1:0] inb, 
+      input  logic             selc, 
+      input  logic [width-1:0] inc,  
+	  input  logic			   seld, 
+	  input  logic [width-1:0] ind,
+	  input  logic             sele, 
+      input  logic [width-1:0] ine,
+      input  logic             self, 
+      input  logic [width-1:0] inf, 
+      input  logic             sel10, 
+      input  logic [width-1:0] in10,
+	  input  logic 			   sel11,
+      input  logic [width-1:0] in11,
+      input  logic             sel12, 
+      input  logic [width-1:0] in12, 
+      input  logic             sel13, 
+      input  logic [width-1:0] in13,  
+	  input  logic			   sel14, 
+	  input  logic [width-1:0] in14,
+	  input  logic             sel15, 
+      input  logic [width-1:0] in15,
+      input  logic             sel16, 
+      input  logic [width-1:0] in16, 
+      input  logic             sel17, 
+      input  logic [width-1:0] in17,
+	  input  logic 			   sel18,
+      input  logic [width-1:0] in18,
+      input  logic             sel19, 
+      input  logic [width-1:0] in19, 
+      input  logic             sel1a, 
+      input  logic [width-1:0] in1a,  
+	  input  logic			   sel1b, 
+	  input  logic [width-1:0] in1b,
+	  input  logic             sel1c, 
+      input  logic [width-1:0] in1c,
+      input  logic             sel1d, 
+      input  logic [width-1:0] in1d, 
+      input  logic             sel1e, 
+      input  logic [width-1:0] in1e,
+	  input  logic 			   sel1f,
+      input  logic [width-1:0] in1f,
+	  
+	  input  logic [width-1:0] in20
+    );
+      always_comb begin
+      unique casez(1'b1) // synopsys infer_onehot_mux
+        sel0 : out = in0;
+        sel1 : out = in1;
+        sel2 : out = in2;
+		sel3 : out = in3;
+		sel4 : out = in4;
+        sel5 : out = in5;	
+        sel6 : out = in6;
+        sel7 : out = in7;
+        sel8 : out = in8;
+		sel9 : out = in9;
+		sela : out = ina;
+        selb : out = inb;			
+        selc : out = inc;
+        seld : out = ind;
+        sele : out = ine;
+		self : out = inf;
+		sel10 : out = in10;
+        sel11 : out = in11;	
+        sel12 : out = in12;
+        sel13 : out = in13;
+        sel14 : out = in14;
+		sel15 : out = in15;
+		sel16 : out = in16;
+        sel17 : out = in17;		
+        sel18 : out = in18;
+        sel19 : out = in19;
+        sel1a : out = in1a;
+		sel1b : out = in1b;
+		sel1c : out = in1c;
+        sel1d : out = in1d;	
+        sel1e : out = in1e;
+        sel1f : out = in1f;		
 		
+        default : out = in20;
+      endcase
+      end
+    endmodule:rmuxd32_im	
+	
+	
+//--random examples & useful things---------
+
     //---------------------------------
     module rdecode_4_16 (
         output logic [15:0]  out,
@@ -529,7 +643,7 @@ assign wren_ent_p =
       assign wrent30_p = wrdata0_p;
       assign wrent31_p = wrdata0_p;
 
-						rregs_en #(32) ent0 (ent0_p, wrent0_p, clk, wren_ent_p[0]);
+							#(32) ent0 (ent0_p, wrent0_p, clk, wren_ent_p[0]);
             rregs_en #(32) ent1 (ent1_p, wrent1_p, clk, wren_ent_p[1]);
             rregs_en #(32) ent2 (ent2_p, wrent2_p, clk, wren_ent_p[2]);
             rregs_en #(32) ent3 (ent3_p, wrent3_p, clk, wren_ent_p[3]);
