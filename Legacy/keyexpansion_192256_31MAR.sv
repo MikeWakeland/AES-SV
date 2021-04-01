@@ -71,7 +71,7 @@
 			8'h76, 8'hab, 8'hd7, 8'hfe, 8'h2b, 8'h67, 8'h01, 8'h30, 8'hc5, 8'h6f, 8'h6b, 8'hf2, 8'h7b, 8'h77, 8'h7c, 8'h63 }; 
 			
 	 const logic [1:0] key_size = 2'b00;
-		logic [1407:0] key_words;
+		logic [1919:0] key_words;
 		logic sm_done;
 /////////////////////////////////////////////////////End fake input section///////////////////////////////////////////////////////	
 		
@@ -83,6 +83,7 @@
 
 		.SBOX											(SBOX),	
 		.true_key									(true_key),	
+		.key_size									(key_size),
 		
 		.key_done									(key_done),
 		.key_words								(key_words) //Four words per round, Four bytes per word, Eight bits per byte.
@@ -98,36 +99,56 @@
 		input 	logic											ready,
 
 		input		logic 	[255:0][7:0]			SBOX,	
-		input		logic 	[127:0]						true_key,
+		input		logic 	[255:0]						true_key,
+		input 	logic 	[1:0]							key_size,
 		
 		output	logic											key_done,
-		output	logic 	[1407:0] 					key_words //Four words per round, Four bytes per word, Eight bits per byte.
+		output	logic 	[1919:0] 					key_words //Four words per round, Four bytes per word, Eight bits per byte.
 		);
 		
-		logic 	[127:0] 					r0k, r1k, r2k, r3k, r4k, r5k, r6k, r7k, r8k, r9k, r10k, key_gen_r, key_gen, true_key_r;
-		logic 										sm_idle,  sm_start, sm_run, sm_finish, sm_idle_next, sm_start_next, sm_run_next, sm_finish_next;	
-		logic 	[3:0] 						cycle_ctr, cycle_ctr_pr;
-		logic 	[1407:0] words_write;
-			
-			rregs smir (sm_idle,   ~reset & sm_idle_next,   eph1);
-			rregs smsr (sm_start,  ~reset & sm_start_next,  eph1);
-			rregs smrr (sm_run,    ~reset & sm_run_next,    eph1);
-			rregs smfr (sm_finish, ~reset & sm_finish_next, eph1);
+		logic 	[255:0] 					r0k, r1k, r2k, r3k, r4k, r5k, r6k, r7k, r8k, r9k, r10k;	
+		logic [1:0] keyflag_128, keyflag_192, keyflag_256;
+		logic [3:0] cycle_ctr, cycle_ctr_pr;
+		logic [255:0] key_gen_r, key_gen, true_key_r, reset_long;
+		logic [14:0][127:0] voltmeter;
+		
+		assign voltmeter = key_words; //better lets me view the output vector on the simulation window - no other function
+		
 
-			assign sm_start_next        =  ready;        // allow start to blow away existingrun
-			assign sm_run_next          = (~sm_start_next) & (sm_start | (sm_run & ~key_done));
-			assign sm_finish_next       = (~sm_start_next) & sm_run & key_done;
-			assign sm_idle_next     		= (~sm_start_next  & ~sm_run_next & ~sm_finish_next);
+assign reset_long = {256{reset}};
+rregs_en #(256,1) keys (true_key_r ,true_key, eph1, ready);
 
 
+logic  sm_idle,  sm_start, sm_run, sm_finish;
+logic  sm_idle_next, sm_start_next, sm_run_next, sm_finish_next;
 
 
-			rregs_en #(128,1) keys (true_key_r ,true_key, eph1, ready);
-	
-			assign key_done =   ( cycle_ctr == 4'h4 );
+rregs smir (sm_idle,    reset & sm_idle_next,   eph1);
+rregs smsr (sm_start,  ~reset & sm_start_next,  eph1);
+rregs smrr (sm_run,    ~reset & sm_run_next,    eph1);
+rregs smfr (sm_finish, ~reset & sm_finish_next, eph1);
 
-			assign  cycle_ctr = reset | sm_start  ? 4'he : (cycle_ctr_pr!='0 ? cycle_ctr_pr - 1'b1 : 4'hf); 
-			rregs #(4) cycr (cycle_ctr_pr, cycle_ctr, eph1);	
+assign sm_start_next        =  ready;        // allow start to blow away existingrun
+assign sm_run_next          = (~sm_start_next) & (sm_start | (sm_run & ~key_done));
+assign sm_finish_next       = (~sm_start_next) & sm_run & key_done;
+assign sm_idle_next     		= (~sm_start_next  & ~sm_run_next & ~sm_finish_next) & sm_finish;
+
+//Sounds like there's a start signal, then you count until you get to the finish,
+//Then you ide.
+
+//key_size for counter.  
+		assign keyflag_256 =	 key_size[1];								 		//1X
+		assign keyflag_192 =  ~key_size[1] & key_size[0];	 		//01
+		assign keyflag_128 =  ~|key_size;									  	//00
+						
+		rmuxdx3_im #(1) finr 	 ( key_done,          //Raises the fin_flag when downcounter cycle_ctr reaches the appropriate value based on the key size.  
+					keyflag_256, ( cycle_ctr == 4'h7 ),
+					keyflag_192, ( cycle_ctr == 4'h6 ),
+					keyflag_128, ( cycle_ctr == 4'h4 ) 	
+		);
+
+		 assign  cycle_ctr = reset | sm_start  ? 4'he : (cycle_ctr_pr!='0 ? cycle_ctr_pr - 1'b1 : 4'hf); //also needs a FSM pulse to go along with this.  
+		 rregs #(4) cycr (cycle_ctr_pr, cycle_ctr, eph1);	
 				
 
 			//This section registers each successive round in the key generation to be tied up for storage.  
@@ -137,21 +158,39 @@
 
 		//	assign ready = |r0k; //this tells the key expansion that the flag is up and the keys are ready to be used.  
 			assign r0k = key_gen_r;
-			rregs_en #(128) key0	 (key_gen_r , key_gen, eph1, sm_start | sm_run );//sm_run);	//key_gen is the output from the key generation module.
-			rregs_en #(128) key1  ( r1k  ,  r0k  , eph1 , sm_run);	
-			rregs_en #(128) key2  ( r2k  ,  r1k  , eph1 , sm_run);
-			rregs_en #(128) key3  ( r3k  ,  r2k  , eph1 , sm_run);
-			rregs_en #(128) key4  ( r4k  ,  r3k  , eph1 , sm_run);
-			rregs_en #(128) key5  ( r5k  ,  r4k  , eph1 , sm_run);
-			rregs_en #(128) key6  ( r6k  ,  r5k  , eph1 , sm_run);
-			rregs_en #(128) key7  ( r7k  ,  r6k  , eph1 , sm_run);			
-			rregs_en #(128) key8  ( r8k  ,  r7k  , eph1 , sm_run);			
-			rregs_en #(128) key9  ( r9k  ,  r8k  , eph1 , sm_run);			
-			rregs_en #(128) key10 ( r10k ,  r9k  , eph1 , sm_run);
+			rregs #(256) key0	 (key_gen_r , key_gen, eph1);	//key_gen is the output from the key generation module.
+			rregs #(256) key1  ( r1k  ,  r0k  , eph1 );	
+			rregs #(256) key2  ( r2k  ,  r1k  , eph1 );
+			rregs #(256) key3  ( r3k  ,  r2k  , eph1 );
+			rregs #(256) key4  ( r4k  ,  r3k  , eph1 );
+			rregs #(256) key5  ( r5k  ,  r4k  , eph1 );
+			rregs #(256) key6  ( r6k  ,  r5k  , eph1 );
+			rregs #(256) key7  ( r7k  ,  r6k  , eph1 );			
+			rregs #(256) key8  ( r8k  ,  r7k  , eph1 );			
+			rregs #(256) key9  ( r9k  ,  r8k  , eph1 );			
+			rregs #(256) key10 ( r10k ,   r9k , eph1 );
 
-	assign words_write = {r10k, r9k, r8k, r7k, r6k, r5k, r4k, r3k, r2k, r1k, r0k};
 			
-		rregs_en #(1920,1) keywrite ( key_words, words_write, eph1, sm_finish); //writes the words to output when everything's said and done.									
+			//administrative assignment to the output for easier indexing.
+	//1792 bits in these objects.  
+	logic [1919:0] words_128, words_192, words_256, words_write;
+	//128'
+	assign words_128 = { 512'h0   , r10k[127:0], r9k[127:0], r8k[127:0], r7k[127:0], r6k[127:0], 
+											r5k[127:0],	 r4k[127:0], r3k[127:0], r2k[127:0], r1k[127:0], r0k[127:0]};
+	//192'
+	assign words_192 = { 256'h0   , r8k[191:0], r7k[191:0], r6k[191:0], r5k[191:0 ],
+											r4k[191:0], r3k[191:0], r2k[191:0], r1k[191:0], r0k[191:64]};
+	//256'
+	assign words_256 = {r7k[255:0], r6k[255:0], r5k[255:0],	r4k[255:0  ],
+											r3k[255:0], r2k[255:0], r1k[255:0], r0k[255:128]};
+	
+		rmuxd3_im #(1920) written (words_write,
+		keyflag_128								, words_128,
+		~keyflag_128 & keyflag_192, words_192,
+																words_256
+			);
+			
+		rregs_en #(1920,1) keywrite ( key_words, words_write, eph1, key_done); //writes the words to output when everything's said and done.									
 				
 
 
@@ -162,7 +201,9 @@
 		.ready										(ready),
 
 		.sm_start									(sm_start),
-		
+		.sm_run										(sm_run),
+		.keyflag_128							(keyflag_128),
+		.keyflag_192							(keyflag_192),//Keyflag 192 and 128
 		.SBOX											(SBOX),	
 		.true_key									(true_key_r),	
 		.key_gen_r								(key_gen_r),
@@ -181,11 +222,14 @@
 
 
 		input 	logic											sm_start,
+		input 	logic											sm_run,
+		input 	logic											keyflag_128,
+		input		logic											keyflag_192,
 		input		logic 	[255:0][7:0]			SBOX,	
-		input		logic 	[127:0]						true_key,
+		input		logic 	[255:0]						true_key,
 		input 	logic 	[7:0][3:0][7:0]		key_gen_r,  
 		
-		output	logic 	[3:0][31:0] 			key_gen //Six words per round, Four bytes per word, Eight bits per byte.
+		output	logic 	[7:0][31:0] 			key_gen //Six words per round, Four bytes per word, Eight bits per byte.
 		);
 
 		logic		[15:0][7:0]				key_bytes;
@@ -235,8 +279,26 @@
 		 //The individual round key words are the XOR values of the pervious key word element, and the previous round's element.
 		 //for the most significant key word in every round, the output of hte g function takes the place of the pervious key word element.
 		 //No g function or XOR is performed on the initial round, which instead only reads the true key input.  
+		 logic [31:0] key_four;
+		 logic [3:0][7:0] key_lkup;
+		 
+		 assign key_lkup[3]=SBOX[key_gen[4][31:24]];
+		 assign key_lkup[2]=SBOX[key_gen[4][23:16]];
+		 assign key_lkup[1]=SBOX[key_gen[4][15:8 ]];
+		 assign key_lkup[0]=SBOX[key_gen[4][7:0  ]];		 
 		
-			assign key_gen[3] = sm_start ? true_key[127:96] 	: g_out															^ key_gen_r[3]; //need sub words lookup here
+		 
+		 rmuxd3_im #(32) keyfor (key_four ,
+					keyflag_128, g_out , 
+					keyflag_192, key_gen[4], 
+					key_lkup 
+					);
+		 
+			assign key_gen[7] = sm_start ? true_key[255:224]	: g_out															^ key_gen_r[7];			
+			assign key_gen[6] = sm_start ? true_key[223:192] 	: key_gen[7]							 					^ key_gen_r[6];
+			assign key_gen[5] = sm_start ? true_key[191:160] 	:(keyflag_192 ? g_out : key_gen[6])	^ key_gen_r[5]; //only the four most sig keys are valid for the last round
+			assign key_gen[4] = sm_start ? true_key[159:128]	: key_gen[5] 												^ key_gen_r[4];			
+			assign key_gen[3] = sm_start ? true_key[127:96] 	: key_four													^ key_gen_r[3]; //need sub words lookup here
 			assign key_gen[2] = sm_start ? true_key[95:64]		: key_gen[3] 												^ key_gen_r[2];
 			assign key_gen[1] = sm_start ? true_key[63:32]		: key_gen[2]				 								^ key_gen_r[1];
 			assign key_gen[0] = sm_start ? true_key[31:0]	  	: key_gen[1] 												^ key_gen_r[0]; 

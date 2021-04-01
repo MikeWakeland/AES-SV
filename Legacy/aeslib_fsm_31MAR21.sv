@@ -23,30 +23,30 @@
 
 	 
 	 aes_encrypt	aes_encrypt (
-				.eph1						(eph1),
-				.reset      		(reset),
+				.eph1				(eph1),
+				.reset      (reset),
 
-				.ready      		(ready),
-				.plain_text 		(plain_text),
-				.key_size   		(key_size), 
-				.key_words  		(key_words_r),
+				.ready      (ready),
+				.plain_text (plain_text),
+				.key_size   (key_size), 
+				.key_words  (key_words_r),
 				
-				.SBOX 					(SBOX),
-				.encrypt_done 	(aes_encrypt_done),
-				.aes_encrypted	(aes_encrypted)
+				.SBOX 			(SBOX),
+				.fin_flag_r (aes_encrypt_done),
+				.aes_out_r	(aes_encrypted)
 		 );
 
 	 aes_decrypt	aes_decrypt (
-				.eph1					(eph1),
-				.reset     		(reset),
+				.eph1				(eph1),
+				.reset      (reset),
 
-				.ready      	(aes_encrypt_done),
-				.cipher     	(aes_encrypted),
-				.key_size   	(key_size), 
-				.key_words  	(key_words_r),
+				.ready      (aes_encrypt_done),
+				.cipher     (aes_encrypted),
+				.key_size   (key_size), 
+				.key_words  (key_words_r),
 				
-				.decrypt_done (aes_decrypt_done),
-				.plain_out		(aes_decrypted)
+				.fin_flag_r (aes_decrypt_done),
+				.plain_out	(aes_decrypted)
 		 );
 
 endmodule:aes_build 
@@ -77,8 +77,8 @@ module aes_encrypt (
 				input logic  [15:1][127:0] 		key_words,
 				
 				output logic [255:0][7:0]			SBOX, 
-				output logic									encrypt_done,
-				output logic [127:0] 					aes_encrypted
+				output logic									fin_flag_r,
+				output logic [127:0] 					aes_out_r
 		 );
 		 
 
@@ -95,8 +95,7 @@ module aes_encrypt (
 		//efficiently using hardware. This SBOX behaves correctly according to the AES standard, with an index input of 8'b0 
 		//correctly being looked up as 8'h16. Since SBOX is used in both AESround and in keyexpansion, it should be in tb_top
 		//and passed as inputs to aesround and keyepansion.
-		
-		assign SBOX		= '{
+		const logic [255:0][7:0] SBOX = '{
 	  // 	xf		xe		 xd			xc		 xb			xa		 x9			x8		 x7			x6		 x5			x4     x3     x2     x1     x0	 		
 			8'h16, 8'hbb, 8'h54, 8'hb0, 8'h0f, 8'h2d, 8'h99, 8'h41, 8'h68, 8'h42, 8'he6, 8'hbf, 8'h0d, 8'h89, 8'ha1, 8'h8c,
 			8'hdf, 8'h28, 8'h55, 8'hce, 8'he9, 8'h87, 8'h1e, 8'h9b, 8'h94, 8'h8e, 8'hd9, 8'h69, 8'h11, 8'h98, 8'hf8, 8'he1,
@@ -116,34 +115,70 @@ module aes_encrypt (
 			8'h76, 8'hab, 8'hd7, 8'hfe, 8'h2b, 8'h67, 8'h01, 8'h30, 8'hc5, 8'h6f, 8'h6b, 8'hf2, 8'h7b, 8'h77, 8'h7c, 8'h63 }; 	
 	
 	
-		///////////////////////This section carries the FSM and associated control for AES encryption.////////////////////////////////////////////////////////
-		 logic										ready_r, rdy_reg, out_rdy, ff_latch, sm_idle,  sm_start, sm_run, sm_finish, 
-															sm_idle_next, sm_start_next, sm_run_next, sm_finish_next;
+		///////////////////////This section performs the control logic for AES encryption.////////////////////////////////////////////////////////
+		 logic										ready_r, rdy_reg, out_rdy, ff_latch;
 		 logic  [127:0]						plain_text_r;
-		 logic 	[3:0] 						cycle_ctr_pr, div_clks, cycle_ctr;
-
-		//FSM
-		assign sm_start_next        =  ready;        
-		assign sm_run_next          = (~sm_start_next) & (sm_start | (sm_run & ~fin_flag));
-		assign sm_finish_next       = (~sm_start_next) & sm_run & fin_flag;
-		assign sm_idle_next     		= (~sm_start_next  & ~sm_run_next & ~sm_finish_next);
-		
-
-		rregs #(1) smir (sm_idle,   ~reset & sm_idle_next,   eph1);
-		rregs #(1) smsr (sm_start,  ~reset & sm_start_next,  eph1);
-		rregs #(1) smrr (sm_run,    ~reset & sm_run_next,    eph1);
-		rregs #(1) smfr (sm_finish, ~reset & sm_finish_next, eph1);
-		
-		//Register plain text inputs.  
-		rregs_en #(128)	pti 	(plain_text_r, plain_text , eph1, sm_start_next);	
-		
-
-		//Assign outputs.  The output is the round's output value when the finish state triggers.
-		assign encrypt_done = sm_finish;
-		assign aes_encrypted = round_recycle; 	
+		 logic 	[3:0] cycle_ctr_pr, div_clks, cycle_ctr;
+			
 	
-		//misc control logic for determining key size and key size dependents (counter and initial counter value). 
+
+		
+
+
+logic  sm_idle,  sm_start, sm_run, sm_finish;
+logic  sm_idle_next, sm_start_next, sm_run_next, sm_finish_next;
+
+
+rregs #(1) smir (sm_idle,    reset & sm_idle_next,   eph1);
+rregs #(1) smsr (sm_start,  ~reset & sm_start_next,  eph1);
+rregs #(1) smrr (sm_run,    ~reset & sm_run_next,    eph1);
+rregs #(1) smfr (sm_finish, ~reset & sm_finish_next, eph1);
+
+assign sm_start_next        =  ready;        // allow start to blow away existingrun
+assign sm_run_next          = (~sm_start_next) & (sm_start | (sm_run & ~fin_flag));
+assign sm_finish_next       = (~sm_start_next) & sm_run & fin_flag;
+assign sm_idle_next     		= (~sm_start_next  & ~sm_run_next & ~sm_finish_next) & sm_finish;
+
+//Sounds like there's a start signal, then you count until you get to the finish,
+//Then you ide.
+
+		rregs #(1) 		rdyi 	(ready_r, ~reset & ready, eph1);  										//registers the input signal.
+		rregs #(1) 		rdyreg (rdy_reg, ~reset & ready_r, eph1);										//rdy_reg enables the support of continuous as well as a pulse ready signal.  
+																												
+		rregs_en #(128)	pti 	(plain_text_r, plain_text , eph1, sm_start_next);	//start flag is one c/c too early so use "ready" instead for this mux reg.  
 	
+		assign start_flag = ~reset & ready_r & ~rdy_reg;														//The start command for the Encryption run.  
+	
+		rregs #(128)  rnrec ( round_recycle , round_out , eph1);										//Registers the previous round out for input to the next round, and output timing purposes
+		assign round_in = sm_start ? plain_text_r^key_words[15] : round_recycle ; //selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
+		assign aes_out_r = round_recycle; 									 												//Captures the registered value of round out as the final output, avoiding another register.    		
+		
+		assign fin_flag_r = sm_finish;
+
+
+
+/* 
+	//Register inputs for timing. 	
+		rregs #(1) 		rdyi 	(ready_r, ~reset & ready, eph1);  										//registers the input signal.
+		rregs #(1) 		rdyreg (rdy_reg, ~reset & ready_r, eph1);										//rdy_reg enables the support of continuous as well as a pulse ready signal.  
+																												
+		rregs_en #(128)	pti 	(plain_text_r, plain_text , eph1, ready & ~ready_r);	//start flag is one c/c too early so use "ready" instead for this mux reg.  
+	
+		assign start_flag = ~reset & ready_r & ~rdy_reg;														//The start command for the Encryption run.  
+	
+		rregs #(128)  rnrec ( round_recycle , round_out , eph1);										//Registers the previous round out for input to the next round, and output timing purposes
+		assign round_in = start_flag ? plain_text_r^key_words[15] : round_recycle ; //selects the plaintext XOR key or previous round's output as the input to the next round.  																																																																			
+		assign aes_out_r = round_recycle; 									 												//Captures the registered value of round out as the final output, avoiding another register.    		
+		
+		
+		rregs #(1) 		finfl  (fin_flag_r, ~reset & (fin_flag &~ff_latch) , eph1);		//delays fin_flag by one c/c to match timing with the proper aes output.  										
+		rregs #(1) fflltch 	 (ff_latch, ~reset&(fin_flag_r | ff_latch),eph1);      	//Ensures single pulse output.
+				
+		 */
+		
+		//This section times the fin_flag, the purpose of which is to tell the machine that it has reached the final round of AES.  The fin flag should rise
+		//after either 10, 12, or 14 rounds depending on the key length.  
+		//Decides what size the key is based on the user's input. Have to initialize at zero due to registered user input.   
 		assign keyflag_256 =	~reset & key_size[1];								 	 //1X
 		assign keyflag_192 =  ~reset & ~key_size[1] & key_size[0];	 //01
 		assign keyflag_128 =  ~reset & ~|key_size;									 //00
@@ -156,19 +191,16 @@ module aes_encrypt (
 		
 		 //Downcounter starts at 14d, counts down every clock.  The value is used to index key_words[] to pull the key from keyexpansion.sv
 		 assign div_clks = 4'he;
-		 assign  cycle_ctr = reset | sm_start ? div_clks : (cycle_ctr_pr!='0 ? cycle_ctr_pr - 1'b1 : 4'hf);
+		 assign  cycle_ctr = reset | start_flag ? div_clks : (cycle_ctr_pr!='0 ? cycle_ctr_pr - 1'b1 : 4'hf);
 		 rregs #(4) cycr (cycle_ctr_pr, cycle_ctr, eph1);	
+				
+		assign round_key = key_words[cycle_ctr];		
+	
 		
 		/////////////////////////////////////////////////////////AES Datapath///////////////////////////////////////////////////////////////////////////////////////
 		//////////////This section defines every successive "round" of AES, where the "inputs" are the round key and previous round's text (or plaintext).///////
-
-		//rnrec loops the previous round's output to the input.  Round_in selects the input for the next round.
-		rregs #(128)  rnrec ( round_recycle , round_out , eph1);
-		assign round_in = sm_start ? plain_text_r^key_words[15] : round_recycle ; 
-		
-		assign round_key = key_words[cycle_ctr];	//Table lookup value based on the counter.
-		
-		logic [15:0][7:0] 	sbox_in, sbox_out;			
+	
+		logic [15:0][7:0] 	sbox_in, sbox_out;	
 		assign sbox_in = round_in; //need to restructure into a [15:0][7:0] bit packed array rather than [127:0].
 
 		//This section performs the actual SBOX table lookup, which matches the contents of the input to the 8 bit address of the SBOX.
@@ -292,8 +324,8 @@ module aes_decrypt (
 				input logic  [1:0]						key_size,			//The user defined key size, comes from keyexpansion.sv 
 				input logic  [15:1][127:0] 		key_words, 		//The pre expanded keys which come from keyexpansion.sv.
 				
-				output logic									decrypt_done, 	//	output logic									decrypt_done,
-				output logic [127:0] 					plain_out			//	output logic [127:0] 					aes_encrypted
+				output logic									fin_flag_r, 	//	output logic									fin_flag_r,
+				output logic [127:0] 					plain_out			//	output logic [127:0] 					aes_out_r
 		 
 		 );
 
@@ -319,36 +351,48 @@ const logic [255:0][7:0] INVSBOX = '{
  8'hcb, 8'he9, 8'hde, 8'hc4, 8'h44, 8'h43, 8'h8e, 8'h34, 8'h87, 8'hff, 8'h2f, 8'h9b, 8'h82, 8'h39, 8'he3, 8'h7c,
  8'hfb, 8'hd7, 8'hf3, 8'h81, 8'h9e, 8'ha3, 8'h40, 8'hbf, 8'h38, 8'ha5, 8'h36, 8'h30, 8'hd5, 8'h6a, 8'h09, 8'h52};
 
-		///////////////////////This section carries the Decryption FSM and associated control logic.////////////////////////////////
-		
+		///////////////////////This section performs the control logic for AES encryption.////////////////////////////////////////////////////////
+			//Register inputs for timing purposes.  start, reset, and eph1 not registered.  
+		 logic										ready_r, rdy_reg, fin_latch, start_ctr;
+		 logic  [127:0]						cipher_r, fin_flag_wide;
+		 logic  [3:0]							cycle_ctr_pr, ctr_initial, cycle_ctr;
 
-			
-		logic										ready_r, rdy_reg, fin_latch, start_ctr, sm_idle, sm_start, sm_run, 
-															sm_finish, sm_idle_next, sm_start_next, sm_run_next, sm_finish_next;
-		logic  [127:0]						cipher_r, fin_flag_wide;
-		logic  [3:0]							cycle_ctr_pr, ctr_initial, cycle_ctr;
 		
-		//Finite state machine: start, run, finish, idle.  
-		assign sm_start_next        =  ready;        // allow start to blow away existingrun
-		assign sm_run_next          = (~sm_start_next) & (sm_start | (sm_run & ~(cycle_ctr == 4'hf)));
-		assign sm_finish_next       = (~sm_start_next) & sm_run & (cycle_ctr == 4'hf);
-		assign sm_idle_next     		= (~sm_start_next  & ~sm_run_next & ~sm_finish_next);
+		
+		
+		
+logic  sm_idle,  sm_start, sm_run, sm_finish;
+logic  sm_idle_next, sm_start_next, sm_run_next, sm_finish_next;
 
-		rregs #(1) smir (sm_idle,   ~reset & sm_idle_next,   eph1);
-		rregs #(1) smsr (sm_start,  ~reset & sm_start_next,  eph1);
-		rregs #(1) smrr (sm_run,    ~reset & sm_run_next,    eph1);
-		rregs #(1) smfr (sm_finish, ~reset & sm_finish_next, eph1);
-		
-		
-		//Register input ciphertext for timing:
-		rregs_en #(128)	ptid 	(cipher_r, cipher , eph1, sm_start_next);						
- 
-		//Direct output logic, registered for timing at the end of every round:
-		assign decrypt_done = sm_finish;
-		assign plain_out 		= round_recycle; 
 
+rregs #(1) smir (sm_idle,    reset & sm_idle_next,   eph1);
+rregs #(1) smsr (sm_start,  ~reset & sm_start_next,  eph1);
+rregs #(1) smrr (sm_run,    ~reset & sm_run_next,    eph1);
+rregs #(1) smfr (sm_finish, ~reset & sm_finish_next, eph1);
+
+assign sm_start_next        =  ready;        // allow start to blow away existingrun
+assign sm_run_next          = (~sm_start_next) & (sm_start | (sm_run & ~(cycle_ctr == 4'hf)));
+assign sm_finish_next       = (~sm_start_next) & sm_run & (cycle_ctr == 4'hf);
+assign sm_idle_next     		= (~sm_start_next  & ~sm_run_next & ~sm_finish_next) & sm_finish;
 	
-	//misc control logic for determining key size and key size dependents (counter and initial counter value). 
+		
+		//Register inputs for timing. 	
+//		rregs #(1) 		rdyid 	(ready_r, ~reset&ready, eph1);
+//		rregs #(1) 		rdyregd (rdy_reg, ~reset&ready_r, eph1);		 //rdy_reg enables the support of continuous as well as a pulse ready signal.
+																															 //AES receives the positive edge of the ready_r flag input.  
+
+		rregs_en #(128)	ptid 	(cipher_r, cipher , eph1, sm_start_next);						
+
+		//Works with ready_r and rdy_reg to provide the start signal to AES
+		//assign start_flag = ~reset & ready_r & ~rdy_reg; 
+		
+		rregs #(128)  rnrecd ( round_recycle , round_out , eph1);
+		assign round_in = sm_start ? cipher_r^key_words[ctr_initial] : round_recycle;						//selects the plaintext XOR key or previous round's output as the input to the next round.  	
+		assign fin_flag_wide = {128{sm_finish}};    																							//Extends fin_flag_r to use AND gates to avoid using a 32' mux. 
+		assign plain_out = fin_flag_wide&round_recycle; 									 												//Captures the registered value of round out as the final output, avoiding another register.    		
+	
+//		rregs #(1) 		finfld  (fin_flag_r, ~reset& (cycle_ctr == 4'hf) & ~fin_latch  , eph1);			//delays fin_flag by one c/c to match timing with the proper aes output.  				
+  
 		//Decides what size the key is based on the user's input. Have to initialize at zero due to registered user input.   
 		assign keyflag_256 =	 key_size[1];								 		//1X
 		assign keyflag_192 =  ~key_size[1] & key_size[0];	 		//01
@@ -367,14 +411,6 @@ const logic [255:0][7:0] INVSBOX = '{
 		assign  cycle_ctr = (( sm_start) ? ctr_initial : cycle_ctr_pr )+1'b1;  
 		rregs #(4) cycrd (cycle_ctr_pr, cycle_ctr, eph1);	
 		
-		
-///////////////////////////////////////AES Decrypt Datapath/////////////////////////////////////		
-
-  //Round recycle logic, end of round n -> start of n+1:	
-		rregs #(128)  rnrecd ( round_recycle , round_out , eph1);
-		
-		assign round_in = sm_start ? cipher_r^key_words[ctr_initial] : round_recycle;						//selects the plaintext XOR key or previous round's output as the input to the next round.  	
-									 													
 		assign round_key = key_words[cycle_ctr];	//Pulls the round key from the input vector.  	
 			
 		///ShiftRows 
@@ -450,7 +486,7 @@ const logic [255:0][7:0] INVSBOX = '{
 		 //The two base multiplications are x2 and x3, which are described as:
 				 //
 		/* Symbolically...
-		x*9=(((x*2)*2)*2)+x
+		x9=(((x*2)*2)*2)+x
 		x*b=((((x*2*2)+x*2)+x
 		x*d=((((x*2)+x*2*2)+x
 		x*e=((((x*2)+x*2)+x*2 

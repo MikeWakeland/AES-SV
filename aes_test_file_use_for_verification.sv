@@ -95,6 +95,7 @@
 				rregs #(1) sdjksuiofiue (res_latch, reset ? 1'b0 :ready | res_latch, eph1);
 
 			logic [127:0] aes_decrypted;
+			logic [2047:0] SBOX; //Used to pass as an input to keyexpansion.  
 			logic 		aes_decrypt_done;
 				
 /////////////////////////////////////////////////////End fake input section///////////////////////////////////////////////////////		
@@ -119,38 +120,6 @@
 		
 		endmodule: tb_top
  
-		
-		
-	
- /* 
- 		aesencrypt aesist (  										//This module instantiates all of AES, which takes only fake inputs and spits out only real results.   
-				.eph1         					(eph1),
-				.reset        					(reset),
-
-				.ready 									(ready),
-				.plain_text							(plain_text),
-				.key_size								(key_size),  
-				.key_words   						(key_words),
-
-				.fin_flag_r							(fin_flag_r),
-				.aes_out_r  						(aes_out_r)   
-		); 
-
-
-
-	
-	aesdecrypt aesdec (  										//This module instantiates all of AES, which takes only fake inputs and spits out only real results.   
-				.eph1         					(eph1),
-				.reset        					(reset),
-
-				.ready 									(fin_flag_r),
-				.cipher				  				(aes_out_r),
-				.key_size		 						(key_size),  
-				.key_words    					(key_words),
-
-				.fin_flag_r							(fin_flag_d),
-				.plain_out  						(plain_out)   
-		);  */ 
 		
 
 		
