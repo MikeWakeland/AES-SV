@@ -8,44 +8,28 @@
 				input logic										ready,
 				input logic  [127:0]					plain_text,
 				input logic  [1:0]						key_size, 
-				input logic  [127:0]					true_key,
+				input logic  [15:1][127:0] 	key_words, //legacy input logic [15:1][127:0]     key_words,
 				
+				output logic [255:0][7:0]			SBOX,
 				output logic									aes_decrypt_done,
 				output logic [127:0] 					aes_decrypted
 );		
 
 	 logic [127:0] 				aes_encrypted;
-	 logic          			aes_encrypt_done, key_flag;
- // logic [15:1][127:0]  key_words_r;
+	 logic          			aes_encrypt_done;
+   logic [15:1][127:0]  key_words_r;
 	 
- //  rregs_en #((15*128),1) keywdsr (key_words_r, key_words, eph1, ready);
-	logic [255:0][7:0] SBOX;  
-	logic [15:1][127:0] key_words;
-	
-	 
-	 
-	 	keyexpansion keysked (
-			.eph1											(eph1),
-			.reset										(reset),										
-			.ready										(ready),
-
-			.SBOX											(SBOX),	
-			.true_key									(true_key),	
-			
-			.key_flag									(key_flag),
-			.key_words								(key_words) //Four words per round, Four bytes per word, Eight bits per byte.
-			);
-	
+   rregs_en #((15*128),1) keywdsr (key_words_r, key_words, eph1, ready);
 
 	 
 	 aes_encrypt	aes_encrypt (
 				.eph1						(eph1),
 				.reset      		(reset),
 
-				.ready      		(key_flag),
+				.ready      		(ready),
 				.plain_text 		(plain_text),
 				.key_size   		(key_size), 
-				.key_words  		(key_words),
+				.key_words  		(key_words_r),
 				
 				.SBOX 					(SBOX),
 				.encrypt_done 	(aes_encrypt_done),
@@ -59,7 +43,7 @@
 				.ready      	(aes_encrypt_done),
 				.cipher     	(aes_encrypted),
 				.key_size   	(key_size), 
-				.key_words  	(key_words),
+				.key_words  	(key_words_r),
 				
 				.decrypt_done (aes_decrypt_done),
 				.plain_out		(aes_decrypted)
@@ -70,150 +54,6 @@ endmodule:aes_build
 //==========================================================================
 
 
-			module keyexpansion (
-			// verification software command: KeyExpansion('(key)', 4) 
-			input 	logic											eph1,
-			input 	logic											reset,
-			input 	logic											ready,
-
-			input		logic 	[255:0][7:0]			SBOX,	
-			input		logic 	[127:0]						true_key,
-			
-			output	logic											key_flag,
-			output	logic 	[15:1][127:0]			key_words //Four words per round, Four bytes per word, Eight bits per byte.
-			);
-		
-			logic 	[127:0] 					r0k, r1k, r2k, r3k, r4k, r5k, r6k, r7k, r8k, r9k, r10k, key_gen_r, key_gen, true_key_r;
-			logic 										sm_idle,  sm_start, sm_run, sm_finish, sm_idle_next, sm_start_next, sm_run_next, sm_finish_next, key_done, key_flag;	
-			logic 	[3:0] 						cycle_ctr, cycle_ctr_pr;
-			
-			rregs #(1) smir (sm_idle,   ~reset & sm_idle_next,   eph1);
-			rregs #(1) smsr (sm_start,  ~reset & sm_start_next,  eph1);
-			rregs #(1) smrr (sm_run,    ~reset & sm_run_next,    eph1);
-			rregs #(1) smfr (sm_finish, ~reset & sm_finish_next, eph1);
-
-			assign sm_start_next        =  ready;        // allow start to blow away existingrun
-			assign sm_run_next          = (~sm_start_next) & (sm_start | (sm_run & ~key_done));
-			assign sm_finish_next       = (~sm_start_next) & sm_run & key_done;
-			assign sm_idle_next     		= (~sm_start_next  & ~sm_run_next & ~sm_finish_next);
-
-			rregs_en #(128,1) keys (true_key_r ,true_key, eph1, ready);
-	
-			assign key_done =   ( cycle_ctr == 4'h0 ) & sm_run;
-			assign key_flag = 	sm_finish;
-
-			assign  cycle_ctr = reset | sm_start  ? 4'ha : (cycle_ctr_pr - 1'b1); 
-			rregs #(4) cycr (cycle_ctr_pr, cycle_ctr, eph1);	
-				
-				
-		//Generates every successive round key.  		
-				keymaker kymker	(
-		.eph1											(eph1),
-		.reset										(reset),										
-		.ready										(ready),
-
-		.sm_start									(sm_start),
-		
-		.SBOX											(SBOX),	
-		.true_key									(true_key_r),	
-		.key_gen_r								(key_gen_r),
-		
-		.key_gen								  (key_gen) //Four words per round, Four bytes per word, Eight bits per byte.
-		);
-
-			//This section registers each successive round in the key generation to be tied up for storage.  
-			//A ready flag is sent to the rest of AES when r0k gains a non zero bit.  
-			//A true key of 128'b0 would never trigger this flag and render the module inoperable, but all zeroes are 
-			//not an advisable key to use.  
-			
-			assign r0k = key_gen_r;
-			rregs_en #(128) key0	 (key_gen_r , key_gen, eph1, sm_start | sm_run );
-			rregs_en #(128) key1  ( r1k  ,  r0k  , eph1 , sm_run);	
-			rregs_en #(128) key2  ( r2k  ,  r1k  , eph1 , sm_run);
-			rregs_en #(128) key3  ( r3k  ,  r2k  , eph1 , sm_run);
-			rregs_en #(128) key4  ( r4k  ,  r3k  , eph1 , sm_run);
-			rregs_en #(128) key5  ( r5k  ,  r4k  , eph1 , sm_run);
-			rregs_en #(128) key6  ( r6k  ,  r5k  , eph1 , sm_run);
-			rregs_en #(128) key7  ( r7k  ,  r6k  , eph1 , sm_run);			
-			rregs_en #(128) key8  ( r8k  ,  r7k  , eph1 , sm_run);			
-			rregs_en #(128) key9  ( r9k  ,  r8k  , eph1 , sm_run);			
-			rregs_en #(128) key10 ( r10k ,  r9k  , eph1 , sm_run);
-
-			assign key_words = { r10k, r9k, r8k, r7k, r6k, r5k, r4k, r3k, r2k, r1k, r0k,512'b0};
-			
-
-		
-			endmodule: keyexpansion
-			
-			module keymaker (
-		// verification software command: KeyExpansion('(key)', 4) 
-		input 	logic											eph1,
-		input 	logic											reset,
-		input 	logic											ready,
-
-
-		input 	logic											sm_start,
-		input		logic 	[255:0][7:0]			SBOX,	
-		input		logic 	[127:0]						true_key,
-		input 	logic 	[7:0][3:0][7:0]		key_gen_r,  
-		
-		output	logic 	[3:0][31:0] 			key_gen //Six words per round, Four bytes per word, Eight bits per byte.
-		);
-
-		logic		[15:0][7:0]				key_bytes;
-		logic		[3:0][7:0]				g_out, g_in, word_sbox, word_shift;
-		logic 	[7:0] 						old_constant, new_constant;
-		logic 	[7:0] 						round_prefix;
-	
-		//////////////////////////////G function. 
-		//This section describes the G function in AES, which takes the least significant 4x32 bit key word from the previous round as an input.
-		//The G function only applies after the initial set of key generation (which is just the true key), for every successive key.  
-		//The G function performs a left barrel shift on each byte of the input word, then performs an SBOX lookup for each byte.
-		//This SBOX lookup is reconcantentated and forms g_out.  
-		//One round worth of keys is generated per clock cycle by rregs cons.
-		
-		assign g_in	= sm_start ?  true_key[31:0] : key_gen_r[0]  ;//whatever the last word is from the last round.
-
-			
-		//This section calculates the round constant, which is a 32'b for every round.  The round constant does not algorithmically apply for the 
-		//initial round of key generation but in hardware it is expressed as a value of 32'b0, which does not operationally change the results when
-		//XOR'd with the original key.  Every successive round is a left shift of the most significant byte, which rolls over to 8'h1b when it overflows.
-		//The remaining 24 bits are added by concatenating 24'b0 to every round key.  
-		//Since the round_prefix is read from new_constant, the first left shift has already occured at reset.
-		//Since the initial round_prefix value has to be zero, that initial shift still can't cause a shift in to the round constant.
-		//There were some timing issues with ensuring this initial value endured beyond the first clock cycle, which includes a posedge.
-		//As such several bits needed to be added to the RHS of the constants, resulting in an 11' constant value which is 
-		//read at the most significant 8 bits.  In total, an 11 bit vector was required to properly time this 8 bit section of the round constant.	
-		
-	  assign new_constant = (old_constant == 8'h80) ? 8'h1b : {old_constant <<1};  
-		assign round_prefix = old_constant;
-		
-		rregs  #(8) cons ( old_constant , sm_start ? 8'b1 : new_constant , eph1); 
-		
-		//performs the barrel shift per AES spec.
-		assign word_shift = {g_in[2:0] , g_in[3]};
-		
-		//performs the AES table lookup, subject to the index reversals described on the SBOX definition.
-		assign word_sbox[3] = SBOX[word_shift[3]]; 
-		assign word_sbox[2] = SBOX[word_shift[2]];		
-		assign word_sbox[1] = SBOX[word_shift[1]];
-		assign word_sbox[0] = SBOX[word_shift[0]];
-		
-		//The actual round constant per the AES standard is a 32' number, and trailing 24' zeroes are concat'd here.   
-		assign g_out = word_sbox ^ {round_prefix, 24'b0};
-		//////////////////////////////End G function
-
-
-	 //The individual round key words are the XOR values of the pervious key word element, and the previous round's element.
-	 //for the most significant key word in every round, the output of hte g function takes the place of the pervious key word element.
-	 //No g function or XOR is performed on the initial round, which instead only reads the true key input.  
-	
-		assign key_gen[3] = sm_start ? true_key[127:96] : g_out				^ key_gen_r[3]; //need sub words lookup here
-		assign key_gen[2] = sm_start ? true_key[95:64]	: key_gen[3] 	^ key_gen_r[2];
-		assign key_gen[1] = sm_start ? true_key[63:32]	: key_gen[2]	^ key_gen_r[1];
-		assign key_gen[0] = sm_start ? true_key[31:0]	  : key_gen[1]	^ key_gen_r[0]; 
-		
-		endmodule: keymaker	
 
 
 

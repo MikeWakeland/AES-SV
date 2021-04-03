@@ -53,11 +53,16 @@
 		*/
 		
 		logic [1:0] key_size;
-		assign key_size = 2'b10;
+		assign key_size = 2'b00;
 		
-		logic [127:0] plain_text;
+		logic [127:0] plain_text, true_key;
 		//assign cipher_text = 128'he49549d94f313d7a7d02ff93dbdb88d6;   //Generated via matlab: binaryVectorToHex(ceil(rand(1,128)-.5))
 		assign plain_text = 128'h27ECB2E3A5EE3894885B5289307400E3;
+
+
+		assign true_key = 128'h2b7e151628aed2a6abf7158809cf4f3c;
+
+
 
 		// The true key is: 256'h0FB7C204C2C12D3997157A6FC8E4BBE432C40D35F2716092, for reference purposes only.
 		logic [15:1][127:0] key_words;   
@@ -71,7 +76,7 @@
 			ans'
 			*/
 			//The key words are arrainged such the first key_word (128'h00010...) is index [15].
-		assign key_words = '{
+/* 		assign key_words = '{
 				128'hF01F2E724AC0AB35BE3A20FF7A7D7FCA, //1
 				128'hD005A3321BBF085C2BC611AE8820839D, //2
 				128'h46F370B60C33DB83B209FB7CC87484B6, //3
@@ -86,16 +91,15 @@
 				128'h4F693F73B88304D676D1337E44BD5039,
 				128'h2F22F85523801B536B529FBCE3DDBB29,
 				128'h5EA8D5D6E62BD10090FAE27ED447B247,
-				128'hCF15581DEC95434E87C7DCF2641A67DB};
+				128'hCF15581DEC95434E87C7DCF2641A67DB}; */
 
 			logic ready, res_latch, pulse_r;
 			
 
-			assign ready = (~reset & ~res_latch) ; 
+			assign ready = (~reset & ~res_latch); 
 				rregs #(1) sdjksuiofiue (res_latch, reset ? 1'b0 :ready | res_latch, eph1);
 
 			logic [127:0] aes_decrypted;
-			logic [2047:0] SBOX; //Used to pass as an input to keyexpansion.  
 			logic 		aes_decrypt_done;
 				
 /////////////////////////////////////////////////////End fake input section///////////////////////////////////////////////////////		
@@ -111,11 +115,10 @@
 				.ready      (ready),
 				.plain_text (plain_text),
 				.key_size   (key_size), 
-				.key_words  (key_words),
+				.true_key 	(true_key),
 				
-				.SBOX							(SBOX),
 				.aes_decrypt_done (aes_decrypt_done),
-				.aes_decrypted	(aes_decrypted)
+				.aes_decrypted		(aes_decrypted)
 		 );
 		
 		endmodule: tb_top

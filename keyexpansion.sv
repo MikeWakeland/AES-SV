@@ -71,91 +71,64 @@
 			8'h76, 8'hab, 8'hd7, 8'hfe, 8'h2b, 8'h67, 8'h01, 8'h30, 8'hc5, 8'h6f, 8'h6b, 8'hf2, 8'h7b, 8'h77, 8'h7c, 8'h63 }; 
 			
 	 const logic [1:0] key_size = 2'b00;
-		logic [1407:0] key_words;
+		logic [10:0][127:0] key_words;
 		logic sm_done;
 /////////////////////////////////////////////////////End fake input section///////////////////////////////////////////////////////	
 		
 
-		keyexpansion keysked (
-		.eph1											(eph1),
-		.reset										(reset),										
-		.ready										(ready),
+			keyexpansion keysked (
+			.eph1											(eph1),
+			.reset										(reset),										
+			.ready										(ready),
 
-		.SBOX											(SBOX),	
-		.true_key									(true_key),	
-		
-		.key_done									(key_done),
-		.key_words								(key_words) //Four words per round, Four bytes per word, Eight bits per byte.
-		);
-	
-		endmodule: tb_top
-
-
-		module keyexpansion (
-		// verification software command: KeyExpansion('(key)', 4) 
-		input 	logic											eph1,
-		input 	logic											reset,
-		input 	logic											ready,
-
-		input		logic 	[255:0][7:0]			SBOX,	
-		input		logic 	[127:0]						true_key,
-		
-		output	logic											key_done,
-		output	logic 	[1407:0] 					key_words //Four words per round, Four bytes per word, Eight bits per byte.
-		);
-		
-		logic 	[127:0] 					r0k, r1k, r2k, r3k, r4k, r5k, r6k, r7k, r8k, r9k, r10k, key_gen_r, key_gen, true_key_r;
-		logic 										sm_idle,  sm_start, sm_run, sm_finish, sm_idle_next, sm_start_next, sm_run_next, sm_finish_next;	
-		logic 	[3:0] 						cycle_ctr, cycle_ctr_pr;
-		logic 	[1407:0] words_write;
+			.SBOX											(SBOX),	
+			.true_key									(true_key),	
 			
-			rregs smir (sm_idle,   ~reset & sm_idle_next,   eph1);
-			rregs smsr (sm_start,  ~reset & sm_start_next,  eph1);
-			rregs smrr (sm_run,    ~reset & sm_run_next,    eph1);
-			rregs smfr (sm_finish, ~reset & sm_finish_next, eph1);
+			.key_flag									(sm_finish),
+			.key_words								(key_words) //Four words per round, Four bytes per word, Eight bits per byte.
+			);
+		
+			endmodule: tb_top
+
+
+			module keyexpansion (
+			// verification software command: KeyExpansion('(key)', 4) 
+			input 	logic											eph1,
+			input 	logic											reset,
+			input 	logic											ready,
+
+			input		logic 	[255:0][7:0]			SBOX,	
+			input		logic 	[127:0]						true_key,
+			
+			output	logic											key_done,
+			output	logic 	[10:0][127:0]			key_words //Four words per round, Four bytes per word, Eight bits per byte.
+			);
+		
+			logic 	[127:0] 					r0k, r1k, r2k, r3k, r4k, r5k, r6k, r7k, r8k, r9k, r10k, key_gen_r, key_gen, true_key_r;
+			logic 										sm_idle,  sm_start, sm_run, sm_finish, sm_idle_next, sm_start_next, sm_run_next, sm_finish_next, key_done;	
+			logic 	[3:0] 						cycle_ctr, cycle_ctr_pr;
+			logic 	[10:0][127:0]		 	words_write;
+			
+			
+			rregs #(1) smir (sm_idle,   ~reset & sm_idle_next,   eph1);
+			rregs #(1) smsr (sm_start,  ~reset & sm_start_next,  eph1);
+			rregs #(1) smrr (sm_run,    ~reset & sm_run_next,    eph1);
+			rregs #(1) smfr (sm_finish, ~reset & sm_finish_next, eph1);
 
 			assign sm_start_next        =  ready;        // allow start to blow away existingrun
 			assign sm_run_next          = (~sm_start_next) & (sm_start | (sm_run & ~key_done));
 			assign sm_finish_next       = (~sm_start_next) & sm_run & key_done;
 			assign sm_idle_next     		= (~sm_start_next  & ~sm_run_next & ~sm_finish_next);
 
-
-
-
 			rregs_en #(128,1) keys (true_key_r ,true_key, eph1, ready);
 	
-			assign key_done =   ( cycle_ctr == 4'h4 );
+			assign key_done =   ( cycle_ctr == 4'h0 ) & sm_run;
 
-			assign  cycle_ctr = reset | sm_start  ? 4'he : (cycle_ctr_pr!='0 ? cycle_ctr_pr - 1'b1 : 4'hf); 
+			assign  cycle_ctr = reset | sm_start  ? 4'ha : (cycle_ctr_pr - 1'b1); 
 			rregs #(4) cycr (cycle_ctr_pr, cycle_ctr, eph1);	
 				
-
-			//This section registers each successive round in the key generation to be tied up for storage.  
-			//A ready flag is sent to the rest of AES when r0k gains a non zero bit.  
-			//A true key of 128'b0 would never trigger this flag and render the module inoperable, but all zeroes are 
-			//not an advisable key to use.  
-
-		//	assign ready = |r0k; //this tells the key expansion that the flag is up and the keys are ready to be used.  
-			assign r0k = key_gen_r;
-			rregs_en #(128) key0	 (key_gen_r , key_gen, eph1, sm_start | sm_run );//sm_run);	//key_gen is the output from the key generation module.
-			rregs_en #(128) key1  ( r1k  ,  r0k  , eph1 , sm_run);	
-			rregs_en #(128) key2  ( r2k  ,  r1k  , eph1 , sm_run);
-			rregs_en #(128) key3  ( r3k  ,  r2k  , eph1 , sm_run);
-			rregs_en #(128) key4  ( r4k  ,  r3k  , eph1 , sm_run);
-			rregs_en #(128) key5  ( r5k  ,  r4k  , eph1 , sm_run);
-			rregs_en #(128) key6  ( r6k  ,  r5k  , eph1 , sm_run);
-			rregs_en #(128) key7  ( r7k  ,  r6k  , eph1 , sm_run);			
-			rregs_en #(128) key8  ( r8k  ,  r7k  , eph1 , sm_run);			
-			rregs_en #(128) key9  ( r9k  ,  r8k  , eph1 , sm_run);			
-			rregs_en #(128) key10 ( r10k ,  r9k  , eph1 , sm_run);
-
-	assign words_write = {r10k, r9k, r8k, r7k, r6k, r5k, r4k, r3k, r2k, r1k, r0k};
-			
-		rregs_en #(1920,1) keywrite ( key_words, words_write, eph1, sm_finish); //writes the words to output when everything's said and done.									
 				
-
-
-				
+		//Generates every successive round key.  		
 				keymaker kymker	(
 		.eph1											(eph1),
 		.reset										(reset),										
@@ -169,7 +142,28 @@
 		
 		.key_gen								  (key_gen) //Four words per round, Four bytes per word, Eight bits per byte.
 		);
-		
+
+			//This section registers each successive round in the key generation to be tied up for storage.  
+			//A ready flag is sent to the rest of AES when r0k gains a non zero bit.  
+			//A true key of 128'b0 would never trigger this flag and render the module inoperable, but all zeroes are 
+			//not an advisable key to use.  
+			
+			assign r0k = key_gen_r;
+			rregs_en #(128) key0	 (key_gen_r , key_gen, eph1, sm_start | sm_run );
+			rregs_en #(128) key1  ( r1k  ,  r0k  , eph1 , sm_run);	
+			rregs_en #(128) key2  ( r2k  ,  r1k  , eph1 , sm_run);
+			rregs_en #(128) key3  ( r3k  ,  r2k  , eph1 , sm_run);
+			rregs_en #(128) key4  ( r4k  ,  r3k  , eph1 , sm_run);
+			rregs_en #(128) key5  ( r5k  ,  r4k  , eph1 , sm_run);
+			rregs_en #(128) key6  ( r6k  ,  r5k  , eph1 , sm_run);
+			rregs_en #(128) key7  ( r7k  ,  r6k  , eph1 , sm_run);			
+			rregs_en #(128) key8  ( r8k  ,  r7k  , eph1 , sm_run);			
+			rregs_en #(128) key9  ( r9k  ,  r8k  , eph1 , sm_run);			
+			rregs_en #(128) key10 ( r10k ,  r9k  , eph1 , sm_run);
+
+			assign key_words = {r10k, r9k, r8k, r7k, r6k, r5k, r4k, r3k, r2k, r1k, r0k};
+			
+
 		
 			endmodule: keyexpansion
 			
@@ -216,7 +210,7 @@
 	  assign new_constant = (old_constant == 8'h80) ? 8'h1b : {old_constant <<1};  
 		assign round_prefix = old_constant;
 		
-		rregs  #(8) cons ( old_constant , reset | sm_start ? 8'b1 : new_constant , eph1); 
+		rregs  #(8) cons ( old_constant , sm_start ? 8'b1 : new_constant , eph1); 
 		
 		//performs the barrel shift per AES spec.
 		assign word_shift = {g_in[2:0] , g_in[3]};
@@ -232,16 +226,16 @@
 		//////////////////////////////End G function
 
 
-		 //The individual round key words are the XOR values of the pervious key word element, and the previous round's element.
-		 //for the most significant key word in every round, the output of hte g function takes the place of the pervious key word element.
-		 //No g function or XOR is performed on the initial round, which instead only reads the true key input.  
+	 //The individual round key words are the XOR values of the pervious key word element, and the previous round's element.
+	 //for the most significant key word in every round, the output of hte g function takes the place of the pervious key word element.
+	 //No g function or XOR is performed on the initial round, which instead only reads the true key input.  
+	
+		assign key_gen[3] = sm_start ? true_key[127:96] : g_out				^ key_gen_r[3]; //need sub words lookup here
+		assign key_gen[2] = sm_start ? true_key[95:64]	: key_gen[3] 	^ key_gen_r[2];
+		assign key_gen[1] = sm_start ? true_key[63:32]	: key_gen[2]	^ key_gen_r[1];
+		assign key_gen[0] = sm_start ? true_key[31:0]	  : key_gen[1]	^ key_gen_r[0]; 
 		
-			assign key_gen[3] = sm_start ? true_key[127:96] 	: g_out															^ key_gen_r[3]; //need sub words lookup here
-			assign key_gen[2] = sm_start ? true_key[95:64]		: key_gen[3] 												^ key_gen_r[2];
-			assign key_gen[1] = sm_start ? true_key[63:32]		: key_gen[2]				 								^ key_gen_r[1];
-			assign key_gen[0] = sm_start ? true_key[31:0]	  	: key_gen[1] 												^ key_gen_r[0]; 
-			
-			endmodule: keymaker	
+		endmodule: keymaker	
 
 
 		

@@ -329,7 +329,7 @@ module aes_encrypt (
 		//rnrec loops the previous round's output to the input.  Round_in selects the input for the next round.
 		logic [127:0] round_recycle, round_in, round_out;
 		
-		rregs_en #(128,1)  rnrec ( round_recycle , round_out , eph1, sm_run | sm_start);
+		rregs_en #(128,1)  rnrec ( round_recycle , round_out , eph1, sm_run);
 		assign round_in = sm_start ? plain_text_r^key_words[15] : round_recycle ; 
 		
 		//Table lookup value based on the counter.
@@ -542,7 +542,7 @@ const logic [255:0][7:0] INVSBOX = '{
 ///////////////////////////////////////AES Decrypt Datapath/////////////////////////////////////		
 
   //Round recycle logic, end of round n -> start of n+1:	
-		rregs_en #(128)  rnrecd ( round_recycle , round_out , eph1, sm_run | sm_start);
+		rregs_en #(128)  rnrecd ( round_recycle , round_out , eph1, sm_run);
 		
 		assign round_in = sm_start ? cipher_r^key_words[ctr_initial] : round_recycle;						//selects the plaintext XOR key or previous round's output as the input to the next round.  	
 									 													
