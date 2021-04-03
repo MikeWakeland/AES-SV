@@ -84,7 +84,7 @@ endmodule:aes_build
 			);
 		
 			logic 	[127:0] 					r0k, r1k, r2k, r3k, r4k, r5k, r6k, r7k, r8k, r9k, r10k, key_gen_r, key_gen, true_key_r;
-			logic 										sm_idle,  sm_start, sm_run, sm_finish, sm_idle_next, sm_start_next, sm_run_next, sm_finish_next, key_done, key_flag;	
+			logic 										sm_idle,  sm_start, sm_run, sm_finish, sm_idle_next, sm_start_next, sm_run_next, sm_finish_next, key_done;	
 			logic 	[3:0] 						cycle_ctr, cycle_ctr_pr;
 			
 			rregs #(1) smir (sm_idle,   ~reset & sm_idle_next,   eph1);
@@ -155,7 +155,7 @@ endmodule:aes_build
 		input 	logic											sm_start,
 		input		logic 	[255:0][7:0]			SBOX,	
 		input		logic 	[127:0]						true_key,
-		input 	logic 	[7:0][3:0][7:0]		key_gen_r,  
+		input 	logic 	[3:0][3:0][7:0]		key_gen_r,  
 		
 		output	logic 	[3:0][31:0] 			key_gen //Six words per round, Four bytes per word, Eight bits per byte.
 		);
@@ -281,8 +281,8 @@ module aes_encrypt (
 	
 		///////////////////////This section carries the FSM and associated control for AES encryption.//////////////////////
 		 logic										sm_idle,  sm_start, sm_run, sm_finish, 
-															sm_idle_next, sm_start_next, sm_run_next, sm_finish_next;
-		 logic  [127:0]						plain_text_r;
+															sm_idle_next, sm_start_next, sm_run_next, sm_finish_next, fin_flag;
+		 logic  [127:0]						plain_text_r, round_recycle;
 		 logic 	[3:0] 						cycle_ctr_pr, cycle_ctr;
 
 		//FSM
@@ -327,7 +327,7 @@ module aes_encrypt (
 		//////////////This section defines every successive "round" of AES, where the "inputs" are the round key and previous round's text (or plaintext).///////
 
 		//rnrec loops the previous round's output to the input.  Round_in selects the input for the next round.
-		logic [127:0] round_recycle, round_in, round_out;
+		logic [127:0] round_in, round_out;
 		
 		rregs_en #(128,1)  rnrec ( round_recycle , round_out , eph1, sm_run | sm_start);
 		assign round_in = sm_start ? plain_text_r^key_words[15] : round_recycle ; 
