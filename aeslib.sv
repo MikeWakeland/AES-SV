@@ -1,9 +1,7 @@
 //==========================================================================
-
+/* 
 
 // Recommended instantiation Method:
-
-
  module aes_build (
 				input logic										eph1,
 				input logic										reset,
@@ -65,7 +63,7 @@
 		 );
 
 endmodule:aes_build 
- 
+  */
  
  
 //==========================================================================
