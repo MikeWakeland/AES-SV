@@ -57,13 +57,11 @@
 		
 		logic [127:0] plain_text, true_key;
 		//assign cipher_text = 128'he49549d94f313d7a7d02ff93dbdb88d6;   //Generated via matlab: binaryVectorToHex(ceil(rand(1,128)-.5))
-		assign plain_text = 128'h27ECB2E3A5EE3894885B5289307400E3;
+		assign plain_text = temp ? 128'h00112233445566778899aabbccddeeff : 128'h27ECB2E3A5EE3894885B5289307400E3;
 
 
-		assign true_key = 128'h2b7e151628aed2a6abf7158809cf4f3c;
-
-
-
+		assign true_key = temp ? 128'h000102030405060708090a0b0c0d0e0f : 128'h2b7e151628aed2a6abf7158809cf4f3c;
+		
 		// The true key is: 256'h0FB7C204C2C12D3997157A6FC8E4BBE432C40D35F2716092, for reference purposes only.
 		logic [15:1][127:0] key_words;   
 			//from 15:1 instead of 14:0 to conveniently index at round_key's index [key_words].
@@ -93,11 +91,15 @@
 				128'h5EA8D5D6E62BD10090FAE27ED447B247,
 				128'hCF15581DEC95434E87C7DCF2641A67DB}; */
 
-			logic ready, res_latch, pulse_r;
+			logic ready, res_latch, pulse_r,temp;
 			
 
-			assign ready = (~reset & ~res_latch); 
-				rregs #(1) sdjksuiofiue (res_latch, reset ? 1'b0 :ready | res_latch, eph1);
+	assign ready = (ctr ==4'h7); 
+logic [3:0] ctr, ctr_next;
+initial ctr = 4'b0;  
+assign ctr_next = ctr +1;
+rregs #(4)  ctrtop (ctr, ctr_next, eph1);
+ rregs #(1) dblcrypt ( temp ,~reset&(aes_decrypt_done | temp), eph1);
 
 			logic [127:0] aes_decrypted;
 			logic 		aes_decrypt_done;
@@ -113,8 +115,7 @@
 				.reset      (reset),
 
 				.ready      (ready),
-				.plain_text (plain_text),
-				.key_size   (key_size), 
+				.plain_text (plain_text), 
 				.true_key 	(true_key),
 				
 				.aes_decrypt_done (aes_decrypt_done),
