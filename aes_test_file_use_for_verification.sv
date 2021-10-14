@@ -40,6 +40,16 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////Bit stuffing section - fake inputs///////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*
+			Software key generation commands:
+			KeyExpansion( 'key' , 4 ); //4 for 128 bits, 6 for 192 bits, 8 for 256 bits
+			dec2hex(ans);
+			ans';
+			reshape(ans,32,[]);
+			ans'
+			*/
+
 logic [127:0] true_key;
 logic [6:0] counter, ctr_next;
 logic [7:0][1:0] funccalls;
@@ -49,11 +59,11 @@ assign ctr_next = counter - 1;
 rregs #(7) ctrnxt (counter, ctr_next, eph1);
 
 
-assign true_key = 128'h000102030405060708090a0b0c0d0e0f;
-assign funccalls = {2'h0, 2'h0, 2'h1, 2'h1, 2'h2, 2'h2, 2'h2, 2'h0};
-assign texts = funccalls[counter[6:4]][0]?ciphertexts[counter[6:4]]:plaintexts[counter[6:4]];
+assign true_key = 128'h000102030405060708090a0b0c0d0e0f;  //128'h2b7e151628aed2a6abf7158809cf4f3c 128'h000102030405060708090a0b0c0d0e0f
+assign funccalls = {2'h0, 2'h0, 2'h1, 2'h1, 2'h2, 2'h2, 2'h2, 2'h2};
+assign texts = funccalls[counter[6:4]][0]        ?      plaintexts[counter[6:4]] :   ciphertexts[counter[6:4]]    ;
 assign plaintexts = {
-128'h00112233445566778899aabbccddeeff,
+128'h00112233445566778899aabbccddeeff, 
 128'h00112233445566778899aabbccddeeff,
 128'h00112233445566778899aabbccddeeff,
 128'h00112233445566778899aabbccddeeff,
@@ -92,6 +102,10 @@ assign ciphertexts = {
 		 );
 		
 		endmodule: tb_top
+ 
+ 
+
+ 
  
 
 		

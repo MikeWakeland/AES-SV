@@ -1,5 +1,6 @@
 //==========================================================================
 		localparam MUX = 1;
+		localparam AES_WID = 128;
 
     // Recommended instantiation Method:
      module aes_build (
@@ -7,41 +8,69 @@
             input logic                   reset,
 
             input logic  [1:0]            func,  //0: idle, 1: encrypt: 2: decrypt, 3: idle.  
-            input logic  [127:0]          text_in, 
-            input logic  [127:0]          true_key,
+            input logic  [AES_WID-1:0]    text_in, 
+            input logic  [AES_WID-1:0]    true_key,
             
             output logic [1:0]						call_complete,  //0: invalid, 1: ciphertext valid, 2: plaintext valid, 3: invalid.  
-						output logic [127:0]          ciphertext,
-						output logic [127:0]          plaintext
+						output logic [AES_WID-1:0]    ciphertext,
+						output logic [AES_WID-1:0]    plaintext
     );    
 
-        logic                  aes_encrypt_done, run_lock;
+/* Common */ 
+
+
 				logic [1:0]						 func_r;
+				logic [3:0]						enc_ctr, enc_ctr_pr, dec_ctr_pr, dec_ctr, key_ctr, key_ctr_pr;
         logic [255:0][7:0]     SBOX;  
-        logic [11:1][127:0]    key_words;
+        logic [11:1][AES_WID-1:0]    key_words, true_key_r, text_in_r ;
 				
+        logic aes_encrypt_done, sm_idle, sm_idle_next, sm_key, sm_key_next, sm_enc, sm_enc_next, sm_dec, sm_dec_next,  aes_decrypt_done, enc_call, dec_call;				
+				logic enc_start, dec_start, key_call, encrypt_active, decrypt_active, key_flag;				
+				rregs_en #(2,MUX) 			call 	 (func_r , reset?'0:func, eph1,reset|sm_idle_next|((sm_enc|sm_dec)&(enc_ctr == 4'b1)));
+				rregs_en #(AES_WID,MUX) datain (text_in_r, text_in, eph1    ,reset|sm_idle_next|((sm_enc|sm_dec)&(enc_ctr == 4'b1))); 
+        rregs_en #(AES_WID,MUX) keys   (true_key_r ,true_key, eph1  ,reset|sm_idle_next|((sm_enc|sm_dec)&(enc_ctr == 4'b1)));				
 				
-				logic enc_start, dec_start, key_start, keys_active, encrypt_active, decrypt_active, key_flag, run_wire ;				
-				rregs_en #(2,MUX) call (func_r , reset?'0:func, eph1,reset|~(encrypt_active|decrypt_active|keys_active));
-				assign run_wire = encrypt_active|decrypt_active|keys_active;
-				assign key_start = ^func_r; 
-				assign enc_start = ~func_r[1] &  func_r[0]; 
-				assign dec_start =  func_r[1] & ~func_r[0]; 				
-				assign call_complete = {aes_decrypt_done, aes_encrypt_done};
+
+				assign key_call = ^func_r; 
+				assign enc_call = ~func_r[1] &  func_r[0]; 
+				assign dec_call =  func_r[1] & ~func_r[0]; 				
 				
-       
+				assign sm_idle_next = ~sm_enc_next & ~sm_dec_next & ~sm_key_next;
+				assign sm_key_next  = (sm_key&(|key_ctr)) | key_call&(sm_enc&~sm_enc_next | sm_dec&~sm_dec_next | sm_idle);
+				assign sm_enc_next  = (enc_call& sm_key & (key_ctr == 4'h0)) | (sm_enc & |enc_ctr); //enc_ctr = 0, not encrypting next.   
+				assign sm_dec_next  = (dec_call& sm_key & (key_ctr == 4'h0)) | (sm_dec & ~(dec_ctr == 4'hb));
+
+        rregs #(1) smidle (sm_idle, ~reset & sm_idle_next, eph1);
+        rregs #(1) smkey  (sm_key,  ~reset & sm_key_next,  eph1);
+        rregs #(1) smenc  (sm_enc,  ~reset & sm_enc_next,  eph1);
+        rregs #(1) smdec  (sm_dec,  ~reset & sm_dec_next,  eph1);				
+			
+	
+				//Keys counter: 
+				
+				assign  key_ctr = reset | (sm_key_next&~sm_key) ? 4'ha : (key_ctr_pr - 1'b1); 
+        rregs_en #(4,MUX) keyctr (key_ctr_pr, key_ctr, eph1, reset|sm_key|sm_key_next);   
+				
+				  //Encrypt counter: 
+	        assign  enc_ctr = (reset | sm_key&(sm_enc_next | sm_dec_next)) ? 4'hb : (enc_ctr_pr - 1'b1); //changed from A 
+					assign  dec_ctr = 4'hb - enc_ctr; 
+         rregs_en #(4,MUX) encdecry (enc_ctr_pr, enc_ctr, eph1,sm_enc|sm_dec|sm_enc_next|sm_dec_next);			
+						 	
+				assign aes_encrypt_done = ~|enc_ctr & sm_enc;
+				assign aes_decrypt_done = ~|enc_ctr & sm_dec;
+	       assign call_complete = {aes_decrypt_done,aes_encrypt_done }; 			
+
          keyexpansion keysked (
           .eph1                      (eph1),
           .reset                     (reset),                    
-          .ready                     (key_start),
-          .encrypt_active            (encrypt_active),
-          .decrypt_active            (decrypt_active),
+          
+					.start_keys								 (key_ctr == 4'ha),
+					.run_keys                  (sm_key),
+					
 
           .SBOX                      (SBOX),  
-          .true_key                  (true_key),  
+          .true_key                  (true_key_r),  
           
-					.keys_active							 (keys_active),
-          .key_flag                  (key_flag),
           .key_words                 (key_words) //Four words per round, Four bytes per word, Eight bits per byte.
           );
       
@@ -50,8 +79,9 @@
             .eph1            (eph1),
             .reset           (reset),
 
-            .ready           (enc_start & key_flag),
-            .plain_text      (text_in),
+            .ready           (sm_enc),
+						.cycle_ctr   		 (enc_ctr),
+            .plain_text      (text_in_r),
             .key_words       (key_words),
             
             .SBOX            (SBOX),
@@ -64,8 +94,9 @@
             .eph1            (eph1),
             .reset           (reset),
 
-            .ready           (dec_start & key_flag),
-            .cipher          (text_in),
+            .ready           (sm_dec),
+						.cycle_ctr   		 (dec_ctr),						
+            .cipher          (text_in_r),
             .key_words       (key_words),
             
             .decrypt_active  (decrypt_active),
@@ -104,59 +135,31 @@
        *****************************************************************************************************************************/
             input   logic                      eph1,
             input   logic                      reset,
-            input   logic                      ready,
-            input   logic                      encrypt_active,
-            input   logic                      decrypt_active,
-
+						
+						input 	logic											 start_keys,
+            input 	logic 										 run_keys, 
+						
             input   logic   [255:0][7:0]       SBOX,  
-            input   logic   [127:0]            true_key,
-            
-						output  logic											 keys_active,
-            output  logic                      key_flag,
-            output  logic   [11:1][127:0]      key_words 
+            input   logic   [AES_WID-1:0]      true_key,
+
+            output  logic   [11:1][AES_WID-1:0]      key_words 
         );
       
-        logic   [127:0]           r0k, r1k, r2k, r3k, r4k, r5k, r6k, r7k, r8k, r9k, r10k, key_gen_r, key_gen, true_key_r;
+        logic   [AES_WID-1:0]           r0k, r1k, r2k, r3k, r4k, r5k, r6k, r7k, r8k, r9k, r10k, key_gen_r, key_gen, true_key_r;
         logic                     sm_idle,  sm_start, sm_run, sm_finish, sm_idle_next, sm_start_next, sm_start_ex,
                                   sm_run_next, sm_finish_next, key_done, run_lock;  
         logic   [3:0]             cycle_ctr, cycle_ctr_pr;
         
-        //----------------------------------------------------------------
-        //KEYEXPANSION's governing Finite State Machine & counter controls.  
-        //----------------------------------------------------------------
-        rregs #(1) smir (sm_idle,   ~reset & sm_idle_next,   eph1);
-        rregs #(1) smsr (sm_start,  ~reset & sm_start_next,  eph1);
-        rregs #(1) smrr (sm_run,    ~reset & sm_run_next,    eph1);
-        rregs #(1) smfr (sm_finish, ~reset & sm_finish_next, eph1);
 
-        assign run_lock = ~encrypt_active & ~decrypt_active ; //Prevents new key generation while enc/dec is active.  
-        assign sm_start_next        =  ready & run_lock &~sm_run;      
-        assign sm_run_next          = (sm_start | (sm_run & ~key_done));
-        assign sm_finish_next       =  sm_run & key_done;
-        assign sm_idle_next         =  ~sm_run_next & ~sm_finish_next;
-
-        rregs_en #(128,1) keys (true_key_r ,true_key, eph1, ready);
-    
-        assign key_done =   ( cycle_ctr == 4'h0 ) & sm_run;
-        assign key_flag =   sm_finish;
-				assign keys_active = sm_run;
-
-        assign  cycle_ctr = reset | sm_start  ? 4'ha : (cycle_ctr_pr - 1'b1); 
-        rregs #(4) cycr (cycle_ctr_pr, cycle_ctr, eph1);  
-          
-          
         //---------------------------------------------------------------------
         //KEYMAKER generates every successive round key for use in KEYEXPANSION
         //----------------------------------------------------------------------   
         keymaker kymker  (
-            .eph1                     (eph1),
-            .reset                    (reset),                    
-            .ready                    (ready),
-
-            .keys_start               (sm_start),
+            .eph1                     (eph1),                 
+            .keys_start               (start_keys),
             
             .SBOX                     (SBOX),  
-            .true_key                 (true_key_r),  
+            .true_key                 (true_key),  
             .key_gen_r                (key_gen_r),
             
             .key_gen                  (key_gen) //Four words per round, Four bytes per word, Eight bits per byte.
@@ -168,17 +171,17 @@
         //----------------------------------------------------------------------------------------------
         assign r0k = key_gen_r;
         
-        rregs_en #(128,1) key0  (key_gen_r , key_gen, eph1, (sm_start | sm_run));
-        rregs_en #(128,1) key1  ( r1k  ,  r0k  , eph1 , sm_run );  
-        rregs_en #(128,1) key2  ( r2k  ,  r1k  , eph1 , sm_run );
-        rregs_en #(128,1) key3  ( r3k  ,  r2k  , eph1 , sm_run );
-        rregs_en #(128,1) key4  ( r4k  ,  r3k  , eph1 , sm_run );
-        rregs_en #(128,1) key5  ( r5k  ,  r4k  , eph1 , sm_run );
-        rregs_en #(128,1) key6  ( r6k  ,  r5k  , eph1 , sm_run );
-        rregs_en #(128,1) key7  ( r7k  ,  r6k  , eph1 , sm_run );      
-        rregs_en #(128,1) key8  ( r8k  ,  r7k  , eph1 , sm_run );      
-        rregs_en #(128,1) key9  ( r9k  ,  r8k  , eph1 , sm_run );      
-        rregs_en #(128,1) key10 ( r10k ,  r9k  , eph1 , sm_run );
+        rregs_en #(AES_WID,MUX) key0  (key_gen_r , reset? '0: key_gen, eph1, (reset | start_keys | run_keys));
+        rregs_en #(AES_WID,MUX) key1  ( r1k  ,  reset? '0:r0k  , eph1 , run_keys | reset );  
+        rregs_en #(AES_WID,MUX) key2  ( r2k  ,  reset? '0:r1k  , eph1 , run_keys | reset);
+        rregs_en #(AES_WID,MUX) key3  ( r3k  ,  reset? '0:r2k  , eph1 , run_keys | reset);
+        rregs_en #(AES_WID,MUX) key4  ( r4k  ,  reset? '0:r3k  , eph1 , run_keys | reset);
+        rregs_en #(AES_WID,MUX) key5  ( r5k  ,  reset? '0:r4k  , eph1 , run_keys | reset);
+        rregs_en #(AES_WID,MUX) key6  ( r6k  ,  reset? '0:r5k  , eph1 , run_keys | reset);
+        rregs_en #(AES_WID,MUX) key7  ( r7k  ,  reset? '0:r6k  , eph1 , run_keys | reset);      
+        rregs_en #(AES_WID,MUX) key8  ( r8k  ,  reset? '0:r7k  , eph1 , run_keys | reset);      
+        rregs_en #(AES_WID,MUX) key9  ( r9k  ,  reset? '0:r8k  , eph1 , run_keys | reset);      
+        rregs_en #(AES_WID,MUX) key10 ( r10k ,  reset? '0:r9k  , eph1 , run_keys | reset);
 
         assign key_words = { r10k, r9k, r8k, r7k, r6k, r5k, r4k, r3k, r2k, r1k, r0k};
   
@@ -191,13 +194,11 @@
           
         module keymaker (
             input   logic                      eph1,
-            input   logic                      reset,
-            input   logic                      ready,
 
 
             input   logic                      keys_start,
             input   logic   [255:0][7:0]       SBOX,  
-            input   logic   [127:0]            true_key,
+            input   logic   [AES_WID-1:0]            true_key,
             input   logic   [3:0][3:0][7:0]    key_gen_r,  
             
             output  logic   [3:0][31:0]        key_gen
@@ -235,7 +236,7 @@
         //---------------    
         
         //Each successive key is dependant upon the previous key.  The first word of each four word set is modified with the g function.      
-        assign key_gen[3] = keys_start ? true_key[127:96] : g_out        ^ key_gen_r[3]; 
+        assign key_gen[3] = keys_start ? true_key[AES_WID-1:96] : g_out        ^ key_gen_r[3]; 
         assign key_gen[2] = keys_start ? true_key[95:64]  : key_gen[3]   ^ key_gen_r[2];
         assign key_gen[1] = keys_start ? true_key[63:32]  : key_gen[2]   ^ key_gen_r[1];
         assign key_gen[0] = keys_start ? true_key[31:0]   : key_gen[1]   ^ key_gen_r[0]; 
@@ -269,13 +270,14 @@
                 input logic                    reset,
 
                 input logic                    ready,
-                input logic  [127:0]           plain_text,
-                input logic  [11:1][127:0]     key_words,
+                input logic  [AES_WID-1:0]           plain_text,
+                input logic  [11:1][AES_WID-1:0]     key_words,
+								input logic [3:0]										 cycle_ctr,
                 
                 output logic [255:0][7:0]      SBOX,            //Passed to keyexpansion to generate the keys.
                 output logic                   encrypt_active, //Passed to keyexpansion to prevent new key generation while in use.
                 output logic                   encrypt_done,   //Flag to say when output is valid
-                output logic [127:0]           aes_encrypted     
+                output logic [AES_WID-1:0]           aes_encrypted     
         );
          
          
@@ -308,50 +310,16 @@
           8'hc0, 8'h72, 8'ha4, 8'h9c, 8'haf, 8'ha2, 8'hd4, 8'had, 8'hf0, 8'h47, 8'h59, 8'hfa, 8'h7d, 8'hc9, 8'h82, 8'hca,
           8'h76, 8'hab, 8'hd7, 8'hfe, 8'h2b, 8'h67, 8'h01, 8'h30, 8'hc5, 8'h6f, 8'h6b, 8'hf2, 8'h7b, 8'h77, 8'h7c, 8'h63 };   
       
-        //------------------------------------------------------------------------------------------------------------------
-        //This section carries the FSM and associated control for AES encryption.
-        //------------------------------------------------------------------------------------------------------------------
-        logic                    sm_idle,  sm_start, sm_run, sm_finish, 
-                                 sm_idle_next, sm_start_next, sm_run_next, sm_finish_next, fin_flag;
-        logic   [127:0]          plain_text_r, round_recycle, round_key;
-        logic   [3:0]            cycle_ctr_pr, cycle_ctr;
-
-        //FSM
-        assign sm_start_next    =  ready & ~sm_run ;//& ~sm_finish;        
-        assign sm_run_next      = (~sm_start_next) & (sm_start | (sm_run & ~fin_flag));
-        assign sm_finish_next   = (~sm_start_next) &  sm_run & fin_flag;
-        assign sm_idle_next     = (~sm_start_next  & ~sm_run_next & ~sm_finish_next);
-        
-
-        rregs #(1) smir (sm_idle,   ~reset & sm_idle_next,   eph1);
-        rregs #(1) smsr (sm_start,  ~reset & sm_start_next,  eph1);
-        rregs #(1) smrr (sm_run,    ~reset & sm_run_next,    eph1);
-        rregs #(1) smfr (sm_finish, ~reset & sm_finish_next, eph1);
-        
-        //Register plain text inputs as applicable. 
-        rregs_en #(128,1)  pti   (plain_text_r, plain_text , eph1, sm_start_next);  
-        
-        //Assign outputs.  The output is the round's output value when the finish state triggers.
-        assign encrypt_active =  sm_start | sm_run;
-        assign encrypt_done   = sm_finish;
-        assign aes_encrypted  = round_recycle;   
-      
-        assign fin_flag = (cycle_ctr == 4'h1);          //Raises the fin_flag when downcounter cycle_ctr reaches the appropriate value based on the key size.  
-        
-        assign  cycle_ctr = (reset | sm_start) ? 4'ha : (cycle_ctr_pr - 1'b1);
-         rregs #(4) cycr (cycle_ctr_pr, cycle_ctr, eph1);
-         
-         
         /***************************************************************************************************************************
                                                             AES Datapath
         Defines every successive "round" of AES, where the "inputs" are the round key and previous round's text (or plaintext).
         ***************************************************************************************************************************/
 
         //rnrec loops the previous round's output to the input.  Round_in selects the input for the next round.
-        logic [127:0] round_in, round_out;
-        
-        rregs_en #(128,1)  rnrec ( round_recycle , round_out , eph1, encrypt_active);
-        assign round_in = sm_start ? plain_text_r^key_words[11] : round_recycle ; 
+        logic [AES_WID-1:0] round_in, round_out, round_recycle, round_key;
+        assign aes_encrypted  = round_recycle;   
+        rregs_en #(AES_WID,MUX)  rnrec ( round_recycle , round_out , eph1, ready);
+        assign round_in = (cycle_ctr == 4'ha) ? plain_text^key_words[11] : round_recycle ; 
         
         assign round_key = key_words[cycle_ctr];  
         
@@ -383,7 +351,7 @@
         //----------
         
         //Indicies are in column-major format.
-        // example, key = {b15, b14, b13,..., b2, b1, b0}.  b0 = key[127:120] = key[15][7:0]
+        // example, key = {b15, b14, b13,..., b2, b1, b0}.  b0 = key[AES_WID-1:120] = key[15][7:0]
         /*
         input matrix (sbox_out):      output matrix, using input indicies:
         col   i    ii    iii  iv           i     ii   iii  iv
@@ -463,7 +431,7 @@
         //bitwise XORs the key with the column output, completing the AddRoundKey step.
         //The mux selects shiftrows or mixcol as an input.  The impact is to skip MixColumns if this is the last AES round. 
         //---------------------------------------------------------------------------------------------
-        assign round_out = (fin_flag ? shiftrows_out : mixcol_out)^round_key; 
+        assign round_out = (cycle_ctr == 4'h1 ? shiftrows_out : mixcol_out)^round_key; 
      
         /***********************************************************************************************/
         /***********************************************************************************************/
@@ -490,17 +458,18 @@
             input logic                    reset,
           
             input logic                    ready,         
-            input logic  [127:0]           cipher,       
-            input logic  [11:1][127:0]     key_words,     
+            input logic  [AES_WID-1:0]           cipher,       
+            input logic  [11:1][AES_WID-1:0]     key_words,
+						input logic [3:0]										 cycle_ctr,						
             
             output logic                   decrypt_active, 
             output logic                   decrypt_done,   
-            output logic [127:0]           plain_out        
+            output logic [AES_WID-1:0]           plain_out        
              
         );
 
-        logic [127:0] round_recycle, round_in, round_out;
-        logic [127:0] round_key;
+        logic [AES_WID-1:0] round_recycle, round_in, round_out;
+        logic [AES_WID-1:0] round_key;
         
         //The INVSBOX has been reversed to allow for easier indexing. Still functions as designed.
         const logic [255:0][7:0] INVSBOX = '{
@@ -522,55 +491,20 @@
          8'hfb, 8'hd7, 8'hf3, 8'h81, 8'h9e, 8'ha3, 8'h40, 8'hbf, 8'h38, 8'ha5, 8'h36, 8'h30, 8'hd5, 8'h6a, 8'h09, 8'h52};
 
        /***************************************************************************************************************************
-                                                          AES Decrypt Control Logic
-       **************************************************************************************************************************/
-            
-        logic                     sm_idle, sm_start, sm_run, sm_finish, sm_idle_next, sm_start_next, sm_run_next, sm_finish_next;
-        logic  [127:0]            cipher_r;
-        logic  [3:0]              cycle_ctr_pr, ctr_initial, cycle_ctr;
-        
-        //Finite state machine: start, run, finish, idle.  
-        assign sm_start_next        =  ready & ~sm_run ;       //& ~sm_finish
-        assign sm_run_next          = (~sm_start_next) & (sm_start | (sm_run & ~(cycle_ctr == 4'hb)));
-        assign sm_finish_next       = (~sm_start_next) & sm_run & (cycle_ctr == 4'hb);
-        assign sm_idle_next         = (~sm_start_next  & ~sm_run_next & ~sm_finish_next);
-
-        rregs #(1) smir (sm_idle,   ~reset & sm_idle_next,   eph1);
-        rregs #(1) smsr (sm_start,  ~reset & sm_start_next,  eph1);
-        rregs #(1) smrr (sm_run,    ~reset & sm_run_next,    eph1);
-        rregs #(1) smfr (sm_finish, ~reset & sm_finish_next, eph1);
-        
-        
-        //Register input ciphertext for timing:
-        rregs_en #(128,1)  ptid   (cipher_r, cipher , eph1, sm_start_next);            
-     
-        //Direct output logic, registered for timing at the end of every round:
-        assign decrypt_active =  sm_start | sm_run;
-        assign decrypt_done = sm_finish;
-        assign plain_out     = round_recycle; 
-
-                
-        //Sets up the original value for the round counter
-        assign ctr_initial = 4'h1;
-        
-        assign  cycle_ctr = (sm_start ? ctr_initial : cycle_ctr_pr )+1'b1;  
-        rregs #(4) cycrd (cycle_ctr_pr, cycle_ctr, eph1);  
-        
-        
-       /***************************************************************************************************************************
                                                           AES Decrypt Datapath 
        **************************************************************************************************************************/    
 
         //------------------------------------------------
         //Round recycle logic, end of round n -> start of n+1:  
         //------------------------------------------------
-        rregs_en #(128,1)  rnrecd ( round_recycle , round_out , eph1, decrypt_active);    
-        assign round_in = sm_start ? cipher_r^key_words[ctr_initial] : round_recycle;                                                  
-        assign round_key = key_words[cycle_ctr];     
+				assign plain_out     = round_recycle;
+        rregs_en #(AES_WID,MUX)  rnrecd ( round_recycle , round_out , eph1, ready);    
+        assign round_in = (cycle_ctr == 4'h1) ? cipher^key_words[1] : round_recycle;                                                  
+        assign round_key = key_words[cycle_ctr+1];     
           
         //-----------------------------------------------------------------------------------
         ///ShiftRows 
-        // example, key = {b15, b14, b13,..., b2, b1, b0}.  b0 = key[127:120] = key[15][7:0]
+        // example, key = {b15, b14, b13,..., b2, b1, b0}.  b0 = key[AES_WID-1:120] = key[15][7:0]
         //----------------------------------------------------------------------------------
         /*
         input matrix (invsbox_out):      output matrix, using input indicies:
@@ -720,7 +654,7 @@
         assign mixcol_out[0]   =  xb(addkey_out[3])   ^ xd(addkey_out[2])  ^ x9(addkey_out[1])  ^ xe(addkey_out[0]);
 
        //The final round does not perform InvMixColumns, so round_out selects addkey_out for the final round.  
-        assign round_out = ( (cycle_ctr == 4'hb) ? addkey_out : mixcol_out); 
+        assign round_out = ( (cycle_ctr == 4'ha) ? addkey_out : mixcol_out); 
 
 
         /***********************************************************************************************/
