@@ -11,7 +11,8 @@
             input logic  [AES_WID-1:0]    text_in, 
             input logic  [AES_WID-1:0]    true_key,
             
-            output logic [1:0]            call_complete,  //0: invalid, 1: ciphertext valid, 2: plaintext valid, 3: invalid.  
+            output logic                  accept_inputs, 
+            output logic [1:0]            call_complete,  //0: invalid, 1: ciphertext valid, 2: plaintext valid, 3: output text invalid, but keys expanded.   
             output logic [AES_WID-1:0]    ciphertext,
             output logic [AES_WID-1:0]    plaintext
     );    
@@ -25,21 +26,26 @@
         logic [11:1][AES_WID-1:0]    key_words, true_key_r, text_in_r ;
         
         logic aes_encrypt_done, sm_idle, sm_idle_next, sm_key, sm_key_next, sm_enc, sm_enc_next, sm_dec, sm_dec_next,  aes_decrypt_done, enc_call, dec_call;        
-        logic enc_start, dec_start, key_call, encrypt_active, decrypt_active, key_flag;        
-        
-        rregs_en #(3,MUX)       call    (func_r , reset?'0:func, eph1,reset|sm_idle_next|((sm_enc|sm_dec)&(enc_ctr == 4'b1)));
-        rregs_en #(AES_WID,MUX) datain (text_in_r, text_in, eph1    ,reset|sm_idle_next|((sm_enc|sm_dec)&(enc_ctr == 4'b1))); 
-        rregs_en #(AES_WID,MUX) keys   (true_key_r ,true_key, eph1  ,reset|sm_idle_next|((sm_enc|sm_dec)&(enc_ctr == 4'b1)));        
+        logic enc_start, dec_start, key_call, encrypt_active, decrypt_active, key_flag, accept_inputs;        
         
 
-        assign key_call =  func_r[2]&(^func_r[1:0]); 
+        assign accept_inputs = sm_idle_next| //accept on idle_next to have fastest uptake on provided data while in idle state.
+                               (sm_key&(key_ctr == 4'h1)&~enc_call&~dec_call)| //Accept inputs when we're almost done with keys, but there's no follow on encryption.
+                               ((sm_enc|sm_dec)&(enc_ctr == 4'b1));  //accept on timing for end of encrypt/decrypt, which necessitates a return to Idle.  
+        
+        rregs_en #(3,MUX)       call    (func_r , reset?'0:func, eph1,reset | accept_inputs);
+        rregs_en #(AES_WID,MUX) datain (text_in_r, reset?'0:text_in, eph1    ,reset | accept_inputs); 
+        rregs_en #(AES_WID,MUX) keys   (true_key_r ,reset?'0:true_key, eph1  ,reset | accept_inputs);        
+        
+
+        assign key_call =  func_r[2]; 
         assign enc_call = ~func_r[1] &  func_r[0]; 
         assign dec_call =  func_r[1] & ~func_r[0];         
         
         assign sm_idle_next = ~sm_enc_next & ~sm_dec_next & ~sm_key_next;
         assign sm_key_next  = (sm_key&(|key_ctr)) | key_call&(sm_enc&~sm_enc_next | sm_dec&~sm_dec_next | sm_idle);
-        assign sm_enc_next  = (enc_call& sm_key & (key_ctr == 4'h0)) | (sm_enc & |enc_ctr); //enc_ctr = 0, not encrypting next.   
-        assign sm_dec_next  = (dec_call& sm_key & (key_ctr == 4'h0)) | (sm_dec & ~(dec_ctr == 4'hb));
+        assign sm_enc_next  = (enc_call& (~key_call | (sm_key&(key_ctr == 4'h0)))) | (sm_enc & |enc_ctr); //enc_ctr = 0, not encrypting next.   
+        assign sm_dec_next  = (dec_call& (~key_call | (sm_key&(key_ctr == 4'h0)))) | (sm_dec & |enc_ctr);
 
         rregs #(1) smidle (sm_idle, ~reset & sm_idle_next, eph1);
         rregs #(1) smkey  (sm_key,  ~reset & sm_key_next,  eph1);
@@ -53,7 +59,7 @@
         rregs_en #(4,MUX) keyctr (key_ctr_pr, key_ctr, eph1, reset|sm_key|sm_key_next);   
         
           //Encrypt counter: 
-          assign  enc_ctr = (reset | sm_key&(sm_enc_next | sm_dec_next)) ? 4'hb : (enc_ctr_pr - 1'b1); //changed from A 
+          assign  enc_ctr = reset|((~sm_enc&~sm_dec)&(sm_enc_next | sm_dec_next)) ? 4'hb : (enc_ctr_pr - 1'b1); //changed from A 
           assign  dec_ctr = 4'hb - enc_ctr; 
          rregs_en #(4,MUX) encdecry (enc_ctr_pr, enc_ctr, eph1,sm_enc|sm_dec|sm_enc_next|sm_dec_next);      
                

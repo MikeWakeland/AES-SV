@@ -60,7 +60,7 @@ rregs #(7) ctrnxt (counter, ctr_next, eph1);
 
 
 assign true_key = 128'h000102030405060708090a0b0c0d0e0f;  //128'h2b7e151628aed2a6abf7158809cf4f3c 128'h000102030405060708090a0b0c0d0e0f
-assign funccalls = {3'h0,  3'h1, 3'h0, 3'h1, 3'h2, 3'h2, 3'h2, 3'h2};
+assign funccalls = {3'h0,  3'h5, 3'h0, 3'h2, 3'h6, 3'h1, 3'h2, 3'h2};
 assign texts = funccalls[counter[6:4]][0]        ?      plaintexts[counter[6:4]] :   ciphertexts[counter[6:4]]    ;
 assign plaintexts = {
 128'h00112233445566778899aabbccddeeff, 
@@ -96,6 +96,7 @@ assign ciphertexts = {
 				.text_in   (texts), 
 				.true_key 	(true_key),
 				.call_complete (call_complete_out),
+				.accept_inputs (inputs_accepted),
 				
         .ciphertext (ciphertext_out),
 				.plaintext 	(plaintext_out)
