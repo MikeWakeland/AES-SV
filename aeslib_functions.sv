@@ -4,18 +4,22 @@
 
 /*
 Advanced Encryption Standard - 128, User's Guide
-Author: LT Michael Wakeland, Naval Postgraduate School.
+Author:  LT Michael Wakeland, Naval Postgraduate School.
+Advisor: Professor Glenn Henry, Centaur Technology
 
+CONTENTS:
+User manual
+AES_Build
+KeyExpansion
+Keymaker (used as part of KeyExpansion)
+AES_Encrypt
+AES_Decrypt
 
 Instruction Decode and required data:
 0: Idle
 1: Encrypt with pre existing expanded keys [func][text_in]
 2: Decrypt with pre existing expanded keys [func][text_in]
-3: Idle
-4: Generate keys ONLY; no crypt operation  [func][true_key]
-5: Generate keys and perform encryption    [func][true_key][text_in]
-6: Generate keys and perform decryption    [func][true_key][text_in]
-7: Idle
+3: Generate keys ONLY; no crypt operation  [func][true_key]
 
 Data Return Decode:
 0: Both data vectors are invalid
@@ -24,36 +28,38 @@ Data Return Decode:
 3: KeyExpansion is complete, but no output text is valid
 
 Providing Data:
-Provide input text, keys, and function calls synchronously.
+Provide input text [127:0], keys [127:0], and function calls [1:0] synchronously.
 Not every function call requires every data vector.  Unneeded vectors are registered,
 but are unused if the function does not require it.  For example, when calling func 2,
 the hardware will sample a [true_key], but will use the previously stored expanded keys
 from previous function calls.  
 
+Timing Delays
+Users MUST provide the next function call before the previous function completes.
+There is negative slack (-2 clks) between a function return and when the next function is injested.
+Use Streaming Delay values to plan function calls.
+If the desired operation is Idle, the Idle opcode (func 0) must be *continuously* asserted.
+While in an Idle state the opcode and data is being continuously sampled, so there is no delay
+between a new function call and start. 
 
-Timing Delays:  
-Key Expansion Time Delay (func 4) (input data registered => output data registered): 13 clocks
+Non-Streaming Delays:  
+Key Expansion Time Delay (func 3) (input data registered => output data registered): 13 clocks
 Encrypt/Decrypt Time Delay (func 1/2): 12 clocks
 KeyExpansion+Encrypt/Decrypt Time Delay (func 5/6): 25 clocks
-Streaming Delays:
-Key Expansion Stream Delay (func 4): 11 clocks
-Encrypt/Decrypt Stream Delay (func 1/2): 10 clocks
-KeyExpansion+Encrypt/Decrypt Stream Delay (func 5/6): 23 clocks
 
-!Exception!
-Allow an additional clock when calling func 5/6 immediately after func 4.  (26 clock time delay/24 clock stream delay, from the time func 5/6 is registered)
-The hardware will accept inputs on the clock after the above exception.
+Streaming Delays:
+Key Expansion Stream Delay (func 3): 11 clocks
+Encrypt/Decrypt Stream Delay (func 1/2): 10 clocks
 
 Calling an Encrypt or Decrypt function without expanding keys after reset will 
 result in an operation with zeros for all round keys.  
 */
 
-    // Recommended instantiation Method:
      module aes_build (
             input logic                   eph1,
             input logic                   reset,
 
-            input logic  [2:0]            func,  //0: idle, 1: encrypt w/ existing keys: 2: decrypt w/ existing keys, 3: idle ... 4: gen keys, 5: keys and encrypt, 6: keys and decrypt,  7: unused.
+            input logic  [1:0]            func,  //0: idle, 1: encrypt w/ existing keys: 2: decrypt w/ existing keys, 3: gen keys
             input logic  [AES_WID-1:0]    text_in, 
             input logic  [AES_WID-1:0]    true_key,
              
@@ -63,76 +69,85 @@ result in an operation with zeros for all round keys.
     );    
 
  
-        logic [1:0]            call_complete_next; 
-        logic [2:0]             func_r, exc_r;
-        logic [3:0]            enc_ctr, enc_ctr_pr, dec_ctr_pr, dec_ctr, key_ctr, key_ctr_pr,enc_ctr_next;
-        logic [255:0][7:0]     SBOX;  
+        logic [1:0]                  call_complete_next, func_r; 
+        logic [3:0]                  enc_ctr, enc_ctr_pr, dec_ctr_pr, dec_ctr, key_ctr, key_ctr_pr,enc_ctr_next, key_ctr_next;
+        logic [255:0][7:0]           SBOX;  
         logic [11:1][AES_WID-1:0]    key_words;
-        logic [AES_WID-1:0]     true_key_r, text_in_r ;
+        logic [AES_WID-1:0]          true_key_r, text_in_r ;
         
-        logic aes_encrypt_done_next, sm_idle, sm_idle_next, sm_key, sm_key_next, sm_enc, sm_enc_next, sm_dec, sm_dec_next,  aes_decrypt_done_next, enc_call, dec_call;        
-        logic enc_start, dec_start, key_call, encrypt_active, decrypt_active, key_flag, accept_inputs, exception;        
+        logic encrypt_done_next, sm_idle, sm_idle_next, sm_key, sm_key_next, sm_enc, sm_enc_next, sm_dec, sm_dec_next,  decrypt_done_next, enc_call, dec_call,        
+              enc_start, dec_start, key_call, encrypt_active, decrypt_active, key_flag, accept_inputs, keys_done_next;        
         
 
         assign accept_inputs = sm_idle_next| //accept on idle_next to have fastest uptake on provided data while in idle state.
-                               (sm_key&(key_ctr == 4'h1)&~enc_call&~dec_call)| //Accept inputs when we're almost done with keys, but there's no follow on encryption.
+                               (sm_key&(key_ctr == 4'h1))| //Accept inputs when we're almost done with keys, but there's no follow on encryption.
                                (sm_enc&(enc_ctr == 4'h2))|  //accept on timing for end of encrypt/decrypt, which necessitates a return to Idle.  
                                (sm_dec&(enc_ctr == 4'h2));
-                               
-        rregs_en #(3,MUX)       call    (func_r , reset?'0:func, eph1,reset | accept_inputs);
-        rregs_en #(3,MUX)       excp    (exc_r , reset?'0:func_r, eph1,reset | accept_inputs);        
-        rregs_en #(AES_WID,MUX) datain (text_in_r, reset?'0:text_in, eph1    ,reset | accept_inputs); 
-        rregs_en #(AES_WID,MUX) keys   (true_key_r ,reset?'0:true_key, eph1  ,reset | accept_inputs);        
-        
-        assign exception = (exc_r == 3'h4) & ((func_r == 3'h5) | (func_r == 3'h6)) & (key_ctr == 4'h0); 
+                             
 
-        assign key_call =  func_r[2] & ~(func_r[0]&func_r[1]); //function code 7 is not used.   
-        assign enc_call = ~func_r[1] &  func_r[0]; 
-        assign dec_call =  func_r[1] & ~func_r[0];         
+        /*********************************
+        Register Data Inputs.
+        **********************************/
+        rregs_en #(3,MUX)       call   (func_r     , reset?'0:func, eph1,reset | accept_inputs);
+        rregs_en #(AES_WID,MUX) datain (text_in_r  , reset?'0:text_in, eph1    ,reset | accept_inputs); 
+        rregs_en #(AES_WID,MUX) keys   (true_key_r , reset?'0:true_key, eph1  ,reset | accept_inputs);  
         
+        /*********************************
+        Instruction decode based on the registered func
+        **********************************/        
+        assign key_call =  (func_r == 2'b11); 
+        assign enc_call =  (func_r == 2'b01); 
+        assign dec_call =  (func_r == 2'b10);         
+        
+        /*********************************
+        Finite state machine.
+        The FSM next states are whatever the registered function values are.
+        Users must continuously assert a function, even if it's idle.  
+        **********************************/        
         assign sm_idle_next = ~sm_enc_next & ~sm_dec_next & ~sm_key_next;
-        assign sm_key_next  = (sm_key&(|key_ctr |(key_call&~enc_call&~dec_call&(key_ctr==4'h0))  )) | key_call&(sm_enc&~sm_enc_next | sm_dec&~sm_dec_next | sm_idle);
-        assign sm_enc_next  = (enc_call& (~key_call | (sm_key&(key_ctr == 4'h0)&~exception))) | (sm_enc & (enc_ctr != 4'h1)); //enc_ctr = 0, not encrypting next.   
-        assign sm_dec_next  = (dec_call& (~key_call | (sm_key&(key_ctr == 4'h0)&~exception))) | (sm_dec & (enc_ctr != 4'h1));
+        assign sm_key_next  = key_call;
+        assign sm_enc_next  = enc_call;
+        assign sm_dec_next  = dec_call;
 
         rregs #(1) smidle (sm_idle, ~reset & sm_idle_next, eph1);
         rregs #(1) smkey  (sm_key,  ~reset & sm_key_next,  eph1);
         rregs #(1) smenc  (sm_enc,  ~reset & sm_enc_next,  eph1);
-        rregs #(1) smdec  (sm_dec,  ~reset & sm_dec_next,  eph1);        
-      
+        rregs #(1) smdec  (sm_dec,  ~reset & sm_dec_next,  eph1);                 
+        
+        /*********************************
+        Output flag setup.
+        Simply creates the output flags based on counters.  The decodes are the same as input:
+        0: no valid output text.
+        1: ciphertext vector valid.
+        2: plaintext vector valid.
+        3: no valid output text, but keys are ready.  
+        **********************************/          
+        assign keys_done_next     = (key_ctr == 4'h0);
+        assign encrypt_done_next  = (enc_ctr == 4'h1) & sm_enc;
+        assign decrypt_done_next  = (enc_ctr == 4'h1) & sm_dec;
+        assign call_complete_next = {decrypt_done_next|keys_done_next,encrypt_done_next|keys_done_next };       
+        rregs #(2) clcmpl ( call_complete, reset? '0: call_complete_next, eph1);
   
-        //Keys counter: 
-        logic [3:0] key_ctr_next; 
-        
-        
-        
-        assign  key_ctr_next = reset | (sm_key_next&~sm_key) |(key_ctr==4'h0)  ? 4'ha : (key_ctr - 1'b1); 
+   
+        /*********************************
+        Counters.
+        Two counters, one for keys (11), and one for encrypt/decrypt(10). 
+        **********************************/  
+        assign  key_ctr_next = reset | (sm_key_next&~sm_key) |keys_done_next  ? 4'ha : (key_ctr - 1'b1); 
         rregs_en #(4,MUX) keyctr (key_ctr, key_ctr_next, eph1, reset|sm_key|sm_key_next);   
         
-          //Encrypt counter: 
-        assign enc_ctr_next = reset|(~sm_enc&sm_enc_next)|(~sm_dec&sm_dec_next)|(enc_ctr==4'h0) ? 4'ha : enc_ctr-1'b1; 
+        assign enc_ctr_next = reset|(~sm_enc&sm_enc_next)|(~sm_dec&sm_dec_next)|(enc_ctr==4'h1) ? 4'ha : enc_ctr-1'b1; 
         rregs_en #(4,MUX) encdecry (enc_ctr, enc_ctr_next, eph1,sm_enc|sm_dec|sm_enc_next|sm_dec_next);            
         assign  dec_ctr = 4'hb - enc_ctr; 
 
-
-         
-        assign aes_encrypt_done_next = (enc_ctr == 4'h1) & sm_enc;
-        assign aes_decrypt_done_next = (enc_ctr == 4'h1) & sm_dec;
-        assign key_exp_done_next = (key_ctr == 4'h0) & key_call & ~enc_call & ~dec_call;
-        assign call_complete_next = {aes_decrypt_done_next|key_exp_done_next,aes_encrypt_done_next|key_exp_done_next };       
-        rregs #(2) clcmpl ( call_complete, reset? '0: call_complete_next, eph1);
         
          keyexpansion keysked (
           .eph1                      (eph1),
-          .reset                     (reset),                    
-          
-          .start_keys                 ((key_ctr == 4'ha)),
+          .reset                     (reset),                            
+          .start_keys                ((key_ctr == 4'ha)),
           .run_keys                  (sm_key|sm_key_next),
-          
-
           .SBOX                      (SBOX),  
-          .true_key                  (true_key_r),  
-          
+          .true_key                  (true_key_r),           
           .key_words                 (key_words) //Four words per round, Four bytes per word, Eight bits per byte.
           );
       
@@ -140,7 +155,7 @@ result in an operation with zeros for all round keys.
        aes_encrypt  aes_encrypt (
             .eph1            (eph1),
             .ready           (sm_enc),
-            .cycle_ctr        (enc_ctr),
+            .cycle_ctr       (enc_ctr),
             .plain_text      (text_in_r),
             .key_words       (key_words),
             
@@ -151,7 +166,7 @@ result in an operation with zeros for all round keys.
        aes_decrypt  aes_decrypt (
             .eph1            (eph1),
             .ready           (sm_dec),
-            .cycle_ctr        (dec_ctr),            
+            .cycle_ctr       (dec_ctr),            
             .cipher          (text_in_r),
             .key_words       (key_words),
 
@@ -163,30 +178,8 @@ result in an operation with zeros for all round keys.
      
      
     //==========================================================================
-          /**********************************
-          CONTENTS
-          KeyExpansion
-          Keymaker (used as part of KeyExpansion)
-          AES_Encrypt
-          AES_Decrypt
-
-          ************************************/
-
 
         module keyexpansion ( 
-        /*************************************************************************************************************************** 
-        Keyexpansion expects exactly all of the following:
-        > A continuous or pulse ready signal.  The signal must be asserted at all times (1 or 0).
-        > Continuous asserted encrypt_decrypt active signals, but these are provided by aes_encrypt and aes_decrypt
-        > The Rijndael SBOX as an input. 
-        > A valid 128' true key, which is read at ready's posedge.  
-    
-        KeyExpansion produces the following:
-        > a pulse signal that indicates key expansion has finished (key_flag) and the cipher text is valid for this clock only.
-        > the key_words vector for use in the encryption and decrytpion rounds.
-        > KeyExpansion will not change the key_words vector until it receives feedback from Encrypt and Decrypt that no operations are 
-          happening.  
-       *****************************************************************************************************************************/
             input   logic                      eph1,
             input   logic                      reset,
             
@@ -250,7 +243,7 @@ result in an operation with zeros for all round keys.
             input   logic                      eph1,
             input   logic                      keys_start,
             input   logic   [255:0][7:0]       SBOX,  
-            input   logic   [AES_WID-1:0]            true_key,
+            input   logic   [AES_WID-1:0]      true_key,
             input   logic   [3:0][3:0][7:0]    key_gen_r,  
             
             output  logic   [3:0][31:0]        key_gen
@@ -288,7 +281,7 @@ result in an operation with zeros for all round keys.
         //---------------    
         
         //Each successive key is dependant upon the previous key.  The first word of each four word set is modified with the g function.      
-        assign key_gen[3] = keys_start ? true_key[AES_WID-1:96] : g_out        ^ key_gen_r[3]; 
+        assign key_gen[3] = keys_start ? true_key[127:96] : g_out        ^ key_gen_r[3]; 
         assign key_gen[2] = keys_start ? true_key[95:64]  : key_gen[3]   ^ key_gen_r[2];
         assign key_gen[1] = keys_start ? true_key[63:32]  : key_gen[2]   ^ key_gen_r[1];
         assign key_gen[0] = keys_start ? true_key[31:0]   : key_gen[1]   ^ key_gen_r[0]; 
@@ -303,41 +296,20 @@ result in an operation with zeros for all round keys.
 
 
         module aes_encrypt (
-              /*************************************************************************************************************************** 
-              AES Encrypt expects exactly all of the following:
-              > A continuous or pulse ready signal.  The signal must be asserted at all times (1 or 0).
-              > Once started another encryption cannot start until the previous encryption ends, but constantly references the key_words vector
-                so key_words cannot be changed without creating problems.  
-              > A valid 128' Key Words vector, arranged such that the most first generated word in the vector carries the largest index.
-              > a plain text input, which must be asserted on the same clock cycle as the positive edge of the ready signal.
-              > Only one encryption cycle can be handled at a time.  The module will not respond until the FSM reaches the end state.    
               
-              AES Encrypt produces the following:
-              > a pulse signal that indicates AES Encrypt has finished and the cipher text is valid for this clock only.
-              > a feedback signal to keyexpansion so it does not allow more keys to be generated until aes_encrypt is finished.  
-              > 128' of cipher text.
-              ***************************************************************************************************************************/
-              
-                input logic                    eph1,
-                input logic                    ready,
+                input logic                          eph1,
+                input logic                          ready,
                 input logic  [AES_WID-1:0]           plain_text,
                 input logic  [11:1][AES_WID-1:0]     key_words,
-                input logic [3:0]                     cycle_ctr,
+                input logic [3:0]                    cycle_ctr,
                 
-                output logic [255:0][7:0]      SBOX,            //Passed to keyexpansion to generate the keys.
+                output logic [255:0][7:0]            SBOX,            //Passed to keyexpansion to generate the keys.
                 output logic [AES_WID-1:0]           aes_encrypted     
         );
          
          
         /***************************************************************************************************************************
-                                                          AES Encrypt Control Logic
-        
-        This section handles all of the round counters, key inputs, and flags required to control AES' inputs and outputs. 
-        This is the hard coded  Rijndael S-Box for use in AES.  Indicies are row major.     
-        AES indexes the S-Box in opposite manner, so the S-BOX is reversed so it can be referenced more 
-        efficiently using hardware. This SBOX behaves correctly according to the AES standard, with an index input of 8'b0 
-        correctly being looked up as 8'h16. Since SBOX is used in both AESround and in keyexpansion, it should be in tb_top
-        and passed as inputs to aesround and keyepansion.
+                                                  Decrypt SBOX, reversed for indexing purposes.
         **************************************************************************************************************************/
         assign SBOX    = '{
         //   xf    xe     xd      xc     xb      xa     x9      x8     x7      x6     x5      x4     x3     x2     x1     x0       
@@ -363,7 +335,7 @@ result in an operation with zeros for all round keys.
         Defines every successive "round" of AES, where the "inputs" are the round key and previous round's text (or plaintext).
         ***************************************************************************************************************************/
 
-        //rnrec loops the previous round's output to the input.  Round_in selects the input for the next round.
+        //Round_in selects the input for the next round.
         logic [AES_WID-1:0] round_in, round_out, round_recycle, round_key;
         assign aes_encrypted  = round_recycle;   
         rregs_en #(AES_WID,MUX)  rnrec ( round_recycle , round_out , eph1, ready);
@@ -489,24 +461,12 @@ result in an operation with zeros for all round keys.
         endmodule: aes_encrypt    
 
         module aes_decrypt (
-          /*************************************************************************************************************************** 
-          AES Decrypt expects exactly all of the following:
-          > An asserted continuous or pulse ready signal.  The signal must be asserted at all times.
-          > Once started another decryption cannot start until the previous decryption ends. 
-          > A valid Key Words vector, arranged such that the most first generated word in the vector carries the largest index.
-          > a cipher text input, which must be asserted on the same clock cycle as the positive edge of the ready signal. 
-          
-          AES Decrypt produces the following:
-          > a pulse signal that indicates AES Decrypt has finished and the cipher text is valid for this clock only.
-          > a feedback signal to keyexpansion so it does not allow more keys to be generated until aes_encrypt is finished.  
-          > 128' of cipher text.
-          ****************************************************************************************************************************/      
-          
-            input logic                    eph1,        
-            input logic                    ready,         
+
+            input logic                           eph1,        
+            input logic                           ready,         
             input logic  [AES_WID-1:0]           cipher,       
             input logic  [11:1][AES_WID-1:0]     key_words,
-            input logic [3:0]                     cycle_ctr,            
+            input logic [3:0]                    cycle_ctr,            
             
             output logic [AES_WID-1:0]           plain_out        
              

@@ -52,7 +52,7 @@
 
 logic [7:0][127:0] true_key;
 logic [6:0] counter, ctr_next;
-logic [7:0][2:0] funccalls;
+logic [7:0][1:0] funccalls;
 logic [7:0][127:0] plaintexts, ciphertexts, texts;
 initial counter = 7'b1111111;
 assign ctr_next = counter - 1;
@@ -73,7 +73,7 @@ assign true_key =
 };
 
 
-assign funccalls = {3'h4,  3'h5, 3'h4, 3'h1, 3'h4, 3'h2, 3'h1, 3'h2};
+assign funccalls = {2'h3,  2'h3, 2'h1, 2'h2, 2'h3, 2'h1, 2'h2, 2'h1};
 assign texts = funccalls[counter[6:4]][0]        ?      plaintexts[counter[6:4]] :   ciphertexts[counter[6:4]]    ;
  assign plaintexts = {
  
