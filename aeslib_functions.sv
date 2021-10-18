@@ -90,7 +90,7 @@ result in an operation with zeros for all round keys.
         /*********************************
         Register Data Inputs.
         **********************************/
-        rregs_en #(3,MUX)       call   (func_r     , reset?'0:func, eph1,reset | accept_inputs);
+        rregs_en #(2,MUX)       call   (func_r     , reset?'0:func, eph1,reset | accept_inputs);
         rregs_en #(AES_WID,MUX) datain (text_in_r  , reset?'0:text_in, eph1    ,reset | accept_inputs); 
         rregs_en #(AES_WID,MUX) keys   (true_key_r , reset?'0:true_key, eph1  ,reset | accept_inputs);  
         
