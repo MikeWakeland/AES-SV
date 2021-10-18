@@ -5,6 +5,8 @@
 /*
 Advanced Encryption Standard - 128, User's Guide
 Author:  LT Michael Wakeland, Naval Postgraduate School.
+				 michael.c.wakeland@gmail.com
+				 +1 713 894 0975
 Advisor: Professor Glenn Henry, Centaur Technology
 
 CONTENTS:
