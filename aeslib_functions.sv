@@ -5,8 +5,8 @@
 /*
 Advanced Encryption Standard - 128, User's Guide
 Author:  LT Michael Wakeland, Naval Postgraduate School.
-				 michael.c.wakeland@gmail.com
-				 +1 713 894 0975
+         michael.c.wakeland@gmail.com
+         +1 713 894 0975
 Advisor: Professor Glenn Henry, Centaur Technology
 
 CONTENTS:
@@ -38,16 +38,15 @@ from previous function calls.
 
 Timing Delays
 Users MUST provide the next function call before the previous function completes.
-There is negative slack (-2 clks) between a function return and when the next function is injested.
+There is negative slack (-1 clk) between a function return and when the next function is injested.
 Use Streaming Delay values to plan function calls.
 If the desired operation is Idle, the Idle opcode (func 0) must be *continuously* asserted.
 While in an Idle state the opcode and data is being continuously sampled, so there is no delay
 between a new function call and start. 
 
 Non-Streaming Delays:  
-Key Expansion Time Delay (func 3) (input data registered => output data registered): 13 clocks
-Encrypt/Decrypt Time Delay (func 1/2): 12 clocks
-KeyExpansion+Encrypt/Decrypt Time Delay (func 5/6): 25 clocks
+Key Expansion Time Delay (func 3) (input data registered => output data registered): 12 clocks
+Encrypt/Decrypt Time Delay (func 1/2): 11 clocks
 
 Streaming Delays:
 Key Expansion Stream Delay (func 3): 11 clocks
@@ -72,50 +71,35 @@ result in an operation with zeros for all round keys.
 
  
         logic [1:0]                  call_complete_next, func_r; 
-        logic [3:0]                  enc_ctr, enc_ctr_pr, dec_ctr_pr, dec_ctr, key_ctr, key_ctr_pr,enc_ctr_next, key_ctr_next;
+        logic [3:0]                  enc_ctr, dec_ctr, key_ctr, enc_ctr_next, key_ctr_next;
         logic [255:0][7:0]           SBOX;  
         logic [11:1][AES_WID-1:0]    key_words;
         logic [AES_WID-1:0]          true_key_r, text_in_r ;
-        
-        logic encrypt_done_next, sm_idle, sm_idle_next, sm_key, sm_key_next, sm_enc, sm_enc_next, sm_dec, sm_dec_next,  decrypt_done_next, enc_call, dec_call,        
-              enc_start, dec_start, key_call, encrypt_active, decrypt_active, key_flag, accept_inputs, keys_done_next;        
+        logic encrypt_done_next, sm_idle, sm_key, sm_enc, sm_dec,  decrypt_done_next, accept_inputs, keys_done_next;        
         
 
-        assign accept_inputs = sm_idle_next| //accept on idle_next to have fastest uptake on provided data while in idle state.
-                               (sm_key&(key_ctr == 4'h1))| //Accept inputs when we're almost done with keys, but there's no follow on encryption.
-                               (sm_enc&(enc_ctr == 4'h2))|  //accept on timing for end of encrypt/decrypt, which necessitates a return to Idle.  
-                               (sm_dec&(enc_ctr == 4'h2));
+        assign accept_inputs =  sm_idle|            //Accept inputs on the last clock of any function call, and while in idle. 
+                               (sm_key&(key_ctr == 4'h0))| 
+                               (sm_enc&(enc_ctr == 4'h1))| 
+                               (sm_dec&(enc_ctr == 4'h1));
                              
-
         /*********************************
         Register Data Inputs.
         **********************************/
         rregs_en #(2,MUX)       call   (func_r     , reset?'0:func, eph1,reset | accept_inputs);
-        rregs_en #(AES_WID,MUX) datain (text_in_r  , reset?'0:text_in, eph1    ,reset | accept_inputs); 
+        rregs_en #(AES_WID,MUX) datain (text_in_r  , reset?'0:text_in,  eph1  ,reset | accept_inputs); 
         rregs_en #(AES_WID,MUX) keys   (true_key_r , reset?'0:true_key, eph1  ,reset | accept_inputs);  
         
         /*********************************
         Instruction decode based on the registered func
-        **********************************/        
-        assign key_call =  (func_r == 2'b11); 
-        assign enc_call =  (func_r == 2'b01); 
-        assign dec_call =  (func_r == 2'b10);         
-        
-        /*********************************
-        Finite state machine.
         The FSM next states are whatever the registered function values are.
         Users must continuously assert a function, even if it's idle.  
         **********************************/        
-        assign sm_idle_next = ~sm_enc_next & ~sm_dec_next & ~sm_key_next;
-        assign sm_key_next  = key_call;
-        assign sm_enc_next  = enc_call;
-        assign sm_dec_next  = dec_call;
+        assign sm_idle =  reset|(func_r == 2'b00);
+        assign sm_key =  ~reset&(func_r == 2'b11);
+        assign sm_enc =  ~reset&(func_r == 2'b01);
+        assign sm_dec =  ~reset&(func_r == 2'b10);
 
-        rregs #(1) smidle (sm_idle, ~reset & sm_idle_next, eph1);
-        rregs #(1) smkey  (sm_key,  ~reset & sm_key_next,  eph1);
-        rregs #(1) smenc  (sm_enc,  ~reset & sm_enc_next,  eph1);
-        rregs #(1) smdec  (sm_dec,  ~reset & sm_dec_next,  eph1);                 
-        
         /*********************************
         Output flag setup.
         Simply creates the output flags based on counters.  The decodes are the same as input:
@@ -135,11 +119,11 @@ result in an operation with zeros for all round keys.
         Counters.
         Two counters, one for keys (11), and one for encrypt/decrypt(10). 
         **********************************/  
-        assign  key_ctr_next = reset | (sm_key_next&~sm_key) |keys_done_next  ? 4'ha : (key_ctr - 1'b1); 
-        rregs_en #(4,MUX) keyctr (key_ctr, key_ctr_next, eph1, reset|sm_key|sm_key_next);   
+        assign  key_ctr_next = reset | keys_done_next  ? 4'ha : (key_ctr - 1'b1); 
+        rregs_en #(4,MUX) keyctr (key_ctr, key_ctr_next, eph1, reset|sm_key);   
         
-        assign enc_ctr_next = reset|(~sm_enc&sm_enc_next)|(~sm_dec&sm_dec_next)|(enc_ctr==4'h1) ? 4'ha : enc_ctr-1'b1; 
-        rregs_en #(4,MUX) encdecry (enc_ctr, enc_ctr_next, eph1,sm_enc|sm_dec|sm_enc_next|sm_dec_next);            
+        assign enc_ctr_next = reset| (enc_ctr == 4'h1) ? 4'ha : enc_ctr-1'b1; 
+        rregs_en #(4,MUX) encdecry (enc_ctr, enc_ctr_next, eph1,reset|sm_enc|sm_dec);            
         assign  dec_ctr = 4'hb - enc_ctr; 
 
         
@@ -147,7 +131,7 @@ result in an operation with zeros for all round keys.
           .eph1                      (eph1),
           .reset                     (reset),                            
           .start_keys                ((key_ctr == 4'ha)),
-          .run_keys                  (sm_key|sm_key_next),
+          .run_keys                  (sm_key),
           .SBOX                      (SBOX),  
           .true_key                  (true_key_r),           
           .key_words                 (key_words) //Four words per round, Four bytes per word, Eight bits per byte.

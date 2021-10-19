@@ -73,7 +73,7 @@ assign true_key =
 };
 
 
-assign funccalls = {2'h3,  2'h3, 2'h1, 2'h2, 2'h3, 2'h1, 2'h2, 2'h1};
+assign funccalls = {2'h3,  2'h3, 2'h2, 2'h2, 2'h1, 2'h1, 2'h3, 2'h1};
 assign texts = funccalls[counter[6:4]][0]        ?      plaintexts[counter[6:4]] :   ciphertexts[counter[6:4]]    ;
  assign plaintexts = {
  
