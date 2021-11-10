@@ -62,7 +62,6 @@ result in an operation with zeros for all round keys.
 
             input logic  [1:0]            func,  //0: idle, 1: encrypt w/ existing keys: 2: decrypt w/ existing keys, 3: gen keys
             input logic  [AES_WID-1:0]    text_in, 
-            input logic  [AES_WID-1:0]    true_key,
              
             output logic [1:0]            call_complete,  //0: invalid, 1: ciphertext valid, 2: plaintext valid, 3: output text invalid, but keys expanded.   
             output logic [AES_WID-1:0]    ciphertext,
@@ -88,7 +87,6 @@ result in an operation with zeros for all round keys.
         **********************************/
         rregs_en #(2,MUX)       call   (func_r     , reset?'0:func, eph1,reset | accept_inputs);
         rregs_en #(AES_WID,MUX) datain (text_in_r  , reset?'0:text_in,  eph1  ,reset | accept_inputs); 
-        rregs_en #(AES_WID,MUX) keys   (true_key_r , reset?'0:true_key, eph1  ,reset | accept_inputs);  
         
         /*********************************
         Instruction decode based on the registered func
@@ -133,7 +131,7 @@ result in an operation with zeros for all round keys.
           .start_keys                ((key_ctr == 4'ha)),
           .run_keys                  (sm_key),
           .SBOX                      (SBOX),  
-          .true_key                  (true_key_r),           
+          .true_key                  (text_in_r),           
           .key_words                 (key_words) //Four words per round, Four bytes per word, Eight bits per byte.
           );
       
